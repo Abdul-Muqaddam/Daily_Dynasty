@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "101343011602",
+    "project_id": "daily-dynasty",
+    "storage_bucket": "daily-dynasty.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:101343011602:android:daac3f856c9ff89fde49cb",
+        "android_client_info": {
+          "package_name": "com.example.daily_dynasty"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "101343011602-2aees4ovfffk441c31avh4jd6ms78od6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.daily_dynasty",
+            "certificate_hash": "5d04085ebdc7bb5a83ba973a3b41c5e16c0647a5"
+          }
+        },
+        {
+          "client_id": "101343011602-sb6q13onk5sngkbgm37re3si25ufhvur.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDbPIVoieU5L21h_lcQbWXHaUgBJTWslh4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "101343011602-sb6q13onk5sngkbgm37re3si25ufhvur.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "101343011602-sqqqvprioppr1ad9ordblg75ij9pj3b3.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.dailyDynasty"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

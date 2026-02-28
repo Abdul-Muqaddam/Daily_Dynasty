@@ -1,8 +1,19 @@
 import 'package:flutter/material.dart';
-import 'screens/matches_screen.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'core/colors.dart';
+import 'screens/splash_screen.dart';
 import 'core/constants.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  
+  // Disable the default Material 3 focus ring globally
+  FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTouch;
+  
   runApp(const MyApp());
 }
 
@@ -17,14 +28,37 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: AppColors.background,
+        useMaterial3: true,
+        // Disable global focus indicators
+        focusColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        hoverColor: Colors.transparent,
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppColors.accentCyan,
           brightness: Brightness.dark,
           surface: AppColors.surface,
+        ).copyWith(
+          outline: Colors.transparent,
+          outlineVariant: Colors.transparent,
+          primary: AppColors.accentCyan,
+          // Explicitly set these to avoid "green" generation from seed if it happens
+          secondary: AppColors.accentCyan.withOpacity(0.8),
+          tertiary: AppColors.accentCyan.withOpacity(0.5),
         ),
-        useMaterial3: true,
+        // Ensure inputs don't add their own borders on focus
+        inputDecorationTheme: const InputDecorationTheme(
+          focusedBorder: InputBorder.none,
+          enabledBorder: InputBorder.none,
+        ),
+        // More aggressive focus neutralization
+        textSelectionTheme: const TextSelectionThemeData(
+          cursorColor: AppColors.accentCyan,
+          selectionColor: Colors.cyan,
+          selectionHandleColor: AppColors.accentCyan,
+        ),
       ),
-      home: const MatchesScreen(),
+      home: const SplashScreen(),
     );
   }
 }

@@ -21,13 +21,18 @@ class ResponsiveHelper {
   }
 
   // Base dimensions based on iPhone 11 Pro (375x812)
-  static double get h => screenHeight / 812;
-  static double get w => screenWidth / 375;
+  // We use the shortest side to determine the scale factor to ensure elements 
+  // don't become too small or distorted in landscape mode.
+  static double get scaleFactor {
+    if (screenWidth == 0 || screenHeight == 0) return 1.0;
+    double shortestSide = screenWidth < screenHeight ? screenWidth : screenHeight;
+    return shortestSide / 375.0;
+  }
 
-  // Use a safety multiplier to ensure text is never zero size
-  static double setSp(double size) => size * (w > 0.1 ? w : 1.0);
-  static double setHeight(double size) => size * (h > 0.1 ? h : 1.0);
-  static double setWidth(double size) => size * (w > 0.1 ? w : 1.0);
+  // Use the scale factor for all dimensions to preserve aspect ratios
+  static double setSp(double size) => size * scaleFactor;
+  static double setHeight(double size) => size * scaleFactor;
+  static double setWidth(double size) => size * scaleFactor;
 
   static double get paddingSide => setWidth(20);
   static double get paddingTop => setHeight(20);

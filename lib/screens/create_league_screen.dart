@@ -1,0 +1,628 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../../core/colors.dart';
+import '../../core/responsive_helper.dart';
+import '../../services/league_service.dart';
+
+class CreateLeagueScreen extends StatefulWidget {
+  const CreateLeagueScreen({super.key});
+
+  @override
+  State<CreateLeagueScreen> createState() => _CreateLeagueScreenState();
+}
+
+class _CreateLeagueScreenState extends State<CreateLeagueScreen>
+    with SingleTickerProviderStateMixin {
+  final PageController _pageController = PageController();
+  final TextEditingController _nameController = TextEditingController();
+
+  int _currentStep = 0;
+  int _maxMembers = 10;
+  String _scoringType = 'standard';
+  bool _allowPublicJoin = false;
+  bool _isLoading = false;
+
+  // Result after creation
+  String? _createdLeagueId;
+  String? _createdJoinCode;
+
+  // Animation
+  late AnimationController _codeAnimController;
+  late Animation<double> _codeAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _codeAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _codeAnim = CurvedAnimation(
+      parent: _codeAnimController,
+      curve: Curves.elasticOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _nameController.dispose();
+    _codeAnimController.dispose();
+    super.dispose();
+  }
+
+  void _nextStep() {
+    if (_currentStep == 0 && _nameController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a league name')),
+      );
+      return;
+    }
+    if (_currentStep < 2) {
+      setState(() => _currentStep++);
+      _pageController.animateToPage(
+        _currentStep,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  void _prevStep() {
+    if (_currentStep > 0) {
+      setState(() => _currentStep--);
+      _pageController.animateToPage(
+        _currentStep,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  Future<void> _createLeague() async {
+    setState(() => _isLoading = true);
+    try {
+      final leagueId = await LeagueService.createLeague(
+        name: _nameController.text.trim(),
+        maxMembers: _maxMembers,
+        scoringType: _scoringType,
+        allowPublicJoin: _allowPublicJoin,
+      );
+
+      // Fetch the join code back
+      final doc = await LeagueService.getUserLeagues();
+      final created = doc.firstWhere(
+        (l) => l['id'] == leagueId,
+        orElse: () => {'joinCode': '------'},
+      );
+
+      setState(() {
+        _createdLeagueId = leagueId;
+        _createdJoinCode = created['joinCode'] as String?;
+      });
+
+      _codeAnimController.forward();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error creating league: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ResponsiveHelper.init(context);
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: _createdLeagueId == null
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+                onPressed: _currentStep > 0 ? _prevStep : () => Navigator.pop(context),
+              )
+            : null,
+        title: Text(
+          _createdLeagueId != null ? 'LEAGUE CREATED!' : 'CREATE LEAGUE',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16.sp,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: Image.asset(
+              'assets/images/signup_background.png',
+              fit: BoxFit.cover,
+              alignment: Alignment.center,
+            ),
+          ),
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    AppColors.overlayTop,
+                    AppColors.overlayBottom,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: _createdLeagueId != null
+          ? _buildSuccessScreen()
+          : Column(
+              children: [
+                _buildStepIndicator(),
+                Expanded(
+                  child: PageView(
+                    controller: _pageController,
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: [
+                      _buildStep1(),
+                      _buildStep2(),
+                      _buildStep3(),
+                    ],
+                  ),
+                ),
+                _buildBottomButton(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepIndicator() {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 16.h),
+      child: Row(
+        children: List.generate(3, (i) {
+          final isActive = i == _currentStep;
+          final isDone = i < _currentStep;
+          return Expanded(
+            child: Container(
+              margin: EdgeInsets.symmetric(horizontal: 4.w),
+              height: 4.h,
+              decoration: BoxDecoration(
+                color: isDone || isActive ? AppColors.accentCyan : Colors.white12,
+                borderRadius: BorderRadius.circular(2.h),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  // ─── Step 1: Name ──────────────────────────────────────────────────────────
+
+  Widget _buildStep1() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(24.w),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: 20.h),
+          Icon(Icons.emoji_events, color: AppColors.accentCyan, size: 48.w),
+          SizedBox(height: 20.h),
+          Text(
+            'Name Your League',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 28.sp,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            'Make it memorable — your members will see this name.',
+            style: TextStyle(color: Colors.white54, fontSize: 14.sp),
+          ),
+          SizedBox(height: 40.h),
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 4.h),
+            decoration: BoxDecoration(
+              color: AppColors.leagueCardBg,
+              borderRadius: BorderRadius.circular(16.h),
+              border: Border.all(color: AppColors.accentCyan.withOpacity(0.3)),
+            ),
+            child: TextField(
+              controller: _nameController,
+              style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.bold),
+              decoration: InputDecoration(
+                hintText: 'e.g. Gridiron Kings FC',
+                hintStyle: TextStyle(color: Colors.white24, fontSize: 16.sp),
+                border: InputBorder.none,
+                prefixIcon: Icon(Icons.shield_outlined, color: AppColors.accentCyan, size: 22.w),
+              ),
+              maxLength: 30,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9 _\-]'))],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Step 2: Settings ──────────────────────────────────────────────────────
+
+  Widget _buildStep2() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(24.w),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: 20.h),
+          Icon(Icons.tune, color: AppColors.accentCyan, size: 48.w),
+          SizedBox(height: 20.h),
+          Text(
+            'League Settings',
+            style: TextStyle(color: Colors.white, fontSize: 28.sp, fontWeight: FontWeight.w900),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            'Customize how your league operates.',
+            style: TextStyle(color: Colors.white54, fontSize: 14.sp),
+          ),
+          SizedBox(height: 32.h),
+
+          // Max Members
+          _buildSettingCard(
+            icon: Icons.group,
+            title: 'Max Members',
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('2', style: TextStyle(color: Colors.white38, fontSize: 12.sp)),
+                    Text(
+                      '$_maxMembers members',
+                      style: TextStyle(color: AppColors.accentCyan, fontSize: 14.sp, fontWeight: FontWeight.bold),
+                    ),
+                    Text('20', style: TextStyle(color: Colors.white38, fontSize: 12.sp)),
+                  ],
+                ),
+                Slider(
+                  value: _maxMembers.toDouble(),
+                  min: 2,
+                  max: 20,
+                  divisions: 18,
+                  activeColor: AppColors.accentCyan,
+                  inactiveColor: Colors.white12,
+                  onChanged: (v) => setState(() => _maxMembers = v.round()),
+                ),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 16.h),
+
+          // Scoring Type
+          _buildSettingCard(
+            icon: Icons.scoreboard,
+            title: 'Scoring Type',
+            child: Column(
+              children: [
+                _buildScoringOption('standard', 'Standard'),
+                _buildScoringOption('half_ppr', 'Half PPR'),
+                _buildScoringOption('ppr', 'Full PPR'),
+              ],
+            ),
+          ),
+
+          SizedBox(height: 16.h),
+
+          // Public Join
+          _buildSettingCard(
+            icon: Icons.lock_open_outlined,
+            title: 'Public Join',
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _allowPublicJoin ? 'Anyone with the code can join' : 'Invite only via join code',
+                  style: TextStyle(color: Colors.white54, fontSize: 13.sp),
+                ),
+                Switch(
+                  value: _allowPublicJoin,
+                  activeColor: AppColors.accentCyan,
+                  onChanged: (v) => setState(() => _allowPublicJoin = v),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingCard({required IconData icon, required String title, required Widget child}) {
+    return Container(
+      padding: EdgeInsets.all(20.w),
+      decoration: BoxDecoration(
+        color: AppColors.leagueCardBg,
+        borderRadius: BorderRadius.circular(16.h),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: AppColors.accentCyan, size: 18.w),
+              SizedBox(width: 8.w),
+              Text(title, style: TextStyle(color: Colors.white70, fontSize: 12.sp, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+            ],
+          ),
+          SizedBox(height: 12.h),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScoringOption(String value, String label) {
+    final isSelected = _scoringType == value;
+    return GestureDetector(
+      onTap: () => setState(() => _scoringType = value),
+      child: Container(
+        margin: EdgeInsets.only(bottom: 8.h),
+        padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 10.h),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.accentCyan.withOpacity(0.15) : Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(10.h),
+          border: Border.all(
+            color: isSelected ? AppColors.accentCyan : Colors.white10,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+              color: isSelected ? AppColors.accentCyan : Colors.white38,
+              size: 18.w,
+            ),
+            SizedBox(width: 12.w),
+            Text(label, style: TextStyle(color: isSelected ? Colors.white : Colors.white54, fontSize: 14.sp)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Step 3: Confirm ───────────────────────────────────────────────────────
+
+  Widget _buildStep3() {
+    final name = _nameController.text.trim().isEmpty ? 'Your League' : _nameController.text.trim();
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(24.w),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: 20.h),
+          Icon(Icons.check_circle_outline, color: AppColors.accentCyan, size: 48.w),
+          SizedBox(height: 20.h),
+          Text(
+            'Ready to Create?',
+            style: TextStyle(color: Colors.white, fontSize: 28.sp, fontWeight: FontWeight.w900),
+          ),
+          SizedBox(height: 8.h),
+          Text('Review your league settings below.', style: TextStyle(color: Colors.white54, fontSize: 14.sp)),
+          SizedBox(height: 32.h),
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(20.w),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppColors.accentCyan.withOpacity(0.15), AppColors.leagueCardBg],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20.h),
+              border: Border.all(color: AppColors.accentCyan.withOpacity(0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildSummaryRow('League Name', name, Icons.emoji_events),
+                Divider(color: Colors.white10, height: 24.h),
+                _buildSummaryRow('Max Members', '$_maxMembers players', Icons.group),
+                Divider(color: Colors.white10, height: 24.h),
+                _buildSummaryRow('Scoring', _scoringType.toUpperCase().replaceAll('_', ' '), Icons.scoreboard),
+                Divider(color: Colors.white10, height: 24.h),
+                _buildSummaryRow('Join Type', _allowPublicJoin ? 'Public' : 'Invite Only', Icons.lock_outline),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String label, String value, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, color: AppColors.accentCyan, size: 20.w),
+        SizedBox(width: 12.w),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: TextStyle(color: Colors.white38, fontSize: 11.sp)),
+            Text(value, style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ─── Bottom Button ─────────────────────────────────────────────────────────
+
+  Widget _buildBottomButton() {
+    final isLastStep = _currentStep == 2;
+    return Container(
+      padding: EdgeInsets.fromLTRB(24.w, 12.h, 24.w, 32.h),
+      child: Container(
+        width: double.infinity,
+        height: 56.h,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [AppColors.accentCyan, AppColors.createGradientPurple],
+          ),
+          borderRadius: BorderRadius.circular(16.h),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.accentCyan.withOpacity(0.3),
+              blurRadius: 15,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _isLoading ? null : (isLastStep ? _createLeague : _nextStep),
+            borderRadius: BorderRadius.circular(16.h),
+            child: Center(
+              child: _isLoading
+                  ? const SizedBox(
+                      height: 24, width: 24,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          isLastStep ? 'CREATE LEAGUE' : 'NEXT',
+                          style: TextStyle(color: Colors.white, fontSize: 16.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
+                        ),
+                        SizedBox(width: 8.w),
+                        Icon(isLastStep ? Icons.check : Icons.arrow_forward, color: Colors.white, size: 20.w),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── Success Screen ────────────────────────────────────────────────────────
+
+  Widget _buildSuccessScreen() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(24.w),
+      child: Column(
+        children: [
+          SizedBox(height: 32.h),
+          Container(
+            width: 100.w, height: 100.w,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.accentCyan.withOpacity(0.15),
+            ),
+            child: Icon(Icons.emoji_events, color: AppColors.accentCyan, size: 52.w),
+          ),
+          SizedBox(height: 24.h),
+          Text(
+            _nameController.text.trim().toUpperCase(),
+            style: TextStyle(color: Colors.white, fontSize: 26.sp, fontWeight: FontWeight.w900, letterSpacing: 1.2),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 8.h),
+          Text('Your league is live!', style: TextStyle(color: Colors.white54, fontSize: 16.sp)),
+
+          SizedBox(height: 40.h),
+
+          Text('JOIN CODE', style: TextStyle(color: Colors.white38, fontSize: 12.sp, fontWeight: FontWeight.bold, letterSpacing: 2.0)),
+          SizedBox(height: 12.h),
+          ScaleTransition(
+            scale: _codeAnim,
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 40.w, vertical: 20.h),
+              decoration: BoxDecoration(
+                color: AppColors.leagueCardBg,
+                borderRadius: BorderRadius.circular(20.h),
+                border: Border.all(color: AppColors.accentCyan, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.accentCyan.withOpacity(0.3),
+                    blurRadius: 20,
+                    spreadRadius: 4,
+                  ),
+                ],
+              ),
+              child: Text(
+                _createdJoinCode ?? '------',
+                style: TextStyle(
+                  color: AppColors.accentCyan,
+                  fontSize: 36.sp,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 8.0,
+                ),
+              ),
+            ),
+          ),
+
+          SizedBox(height: 16.h),
+          Text('Share this code with friends to invite them.', style: TextStyle(color: Colors.white38, fontSize: 13.sp), textAlign: TextAlign.center),
+
+          SizedBox(height: 32.h),
+
+          // Copy Button
+          Container(
+            width: double.infinity,
+            height: 52.h,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [AppColors.accentCyan, AppColors.createGradientPurple]),
+              borderRadius: BorderRadius.circular(14.h),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: _createdJoinCode ?? ''));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Join code copied to clipboard!')),
+                  );
+                },
+                borderRadius: BorderRadius.circular(14.h),
+                child: Center(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.copy, color: Colors.white, size: 20.w),
+                      SizedBox(width: 8.w),
+                      Text('COPY JOIN CODE', style: TextStyle(color: Colors.white, fontSize: 15.sp, fontWeight: FontWeight.w900)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(height: 16.h),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Back to League', style: TextStyle(color: Colors.white54, fontSize: 14.sp)),
+          ),
+        ],
+      ),
+    );
+  }
+}

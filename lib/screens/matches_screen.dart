@@ -1,10 +1,49 @@
 import 'package:flutter/material.dart';
+import '../core/colors.dart';
 import '../core/constants.dart';
 import '../core/responsive_helper.dart';
 import '../widgets/match_card.dart';
+import 'tabs/home_tab.dart';
+import 'tabs/league_tab.dart';
+import 'tabs/market_tab.dart';
+import 'profile_screen.dart';
 
-class MatchesScreen extends StatelessWidget {
+class MatchesScreen extends StatefulWidget {
   const MatchesScreen({super.key});
+
+  @override
+  State<MatchesScreen> createState() => _MatchesScreenState();
+}
+
+class _MatchesScreenState extends State<MatchesScreen> {
+  late PageController _pageController;
+  int _currentIndex = 0; // Start on HOME tab
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: 0);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _onPageChanged(int index) {
+    setState(() {
+      _currentIndex = index;
+    });
+  }
+
+  void _onNavBarTapped(int index) {
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12,46 +51,82 @@ class MatchesScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: PageView(
+          controller: _pageController,
+          onPageChanged: _onPageChanged,
           children: [
-            _buildHeader(),
-            _buildDateSelector(),
-            Expanded(
-              child: ListView(
-                children: [
-                  MatchCard(
-                    team1Name: "LIVERPOOL",
-                    team2Name: "CHELSEA",
-                    team1Logo: "L",
-                    team2Logo: "C",
-                    remainingTime: Duration(hours: 3, minutes: 45, seconds: 17),
-                    location: "Anfield Stadium",
-                    isLive: true,
-                  ),
-                  MatchCard(
-                    team1Name: "MAN. UTD",
-                    team2Name: "MAN. CITY",
-                    team1Logo: "M",
-                    team2Logo: "C",
-                    fixedTime: "8:00 PM",
-                    location: "Old Trafford",
-                  ),
-                  MatchCard(
-                    team1Name: "MARSEILLE",
-                    team2Name: "PSG",
-                    team1Logo: "M",
-                    team2Logo: "P",
-                    fixedTime: "OCT 24, 2:45 PM",
-                    location: "Parc des Princes",
-                  ),
-                ],
-              ),
-            ),
+            const HomeTab(),
+            _buildPlaceholderTab("ROSTER"),
+            const MarketTab(),
+            const LeagueTab(),
+            _buildMatchesTab(),
+            const ProfileScreen(),
           ],
         ),
       ),
       bottomNavigationBar: _buildBottomNavBar(),
+    );
+  }
+
+  Widget _buildPlaceholderTab(String title) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.construction, color: AppColors.accentCyan, size: 64.w),
+          SizedBox(height: 16.h),
+          Text(
+            "$title TAB",
+            style: AppTextStyles.heading.copyWith(color: Colors.white70),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            "Coming Soon",
+            style: AppTextStyles.body,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMatchesTab() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildHeader(),
+        _buildDateSelector(),
+        Expanded(
+          child: ListView(
+            children: const [
+              MatchCard(
+                team1Name: "LIVERPOOL",
+                team2Name: "CHELSEA",
+                team1Logo: "L",
+                team2Logo: "C",
+                remainingTime: Duration(hours: 3, minutes: 45, seconds: 17),
+                location: "Anfield Stadium",
+                isLive: true,
+              ),
+              MatchCard(
+                team1Name: "MAN. UTD",
+                team2Name: "MAN. CITY",
+                team1Logo: "M",
+                team2Logo: "C",
+                fixedTime: "8:00 PM",
+                location: "Old Trafford",
+              ),
+              MatchCard(
+                team1Name: "MARSEILLE",
+                team2Name: "PSG",
+                team1Logo: "M",
+                team2Logo: "P",
+                fixedTime: "OCT 24, 2:45 PM",
+                location: "Parc des Princes",
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -140,13 +215,15 @@ class MatchesScreen extends StatelessWidget {
       type: BottomNavigationBarType.fixed,
       selectedItemColor: AppColors.accentCyan,
       unselectedItemColor: AppColors.textSecondary,
-      currentIndex: 4,
+      currentIndex: _currentIndex,
+      onTap: _onNavBarTapped,
       items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: "HOME"),
+        BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: "TEAM"),
         BottomNavigationBarItem(icon: Icon(Icons.emoji_events_outlined), label: "ROSTER"),
         BottomNavigationBarItem(icon: Icon(Icons.sports_soccer), label: "MARKET"),
         BottomNavigationBarItem(icon: Icon(Icons.layers_outlined), label: "LEAGUE"),
         BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: "MATCHES"),
+        BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: "PROFILE"),
       ],
     );
   }
