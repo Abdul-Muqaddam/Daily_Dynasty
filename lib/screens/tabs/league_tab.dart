@@ -3,10 +3,17 @@ import '../../core/colors.dart';
 import '../../core/constants.dart';
 import '../../core/responsive_helper.dart';
 import '../../services/league_service.dart';
+import '../../services/user_service.dart';
 import '../../widgets/join_league_bottom_sheet.dart';
+import '../../widgets/app_dialogs.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../create_league_screen.dart';
 import '../league_details_screen.dart';
 import '../league_games_screen.dart';
+import '../trophy_room_screen.dart';
+import '../commissioner_tools_screen.dart';
+import '../league_chat_screen.dart';
 
 class LeagueTab extends StatefulWidget {
   const LeagueTab({super.key});
@@ -18,11 +25,38 @@ class LeagueTab extends StatefulWidget {
 class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   bool _showBracket = false;
+  final Map<String, String> _managerNames = {};
+  bool _isGuest = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final profile = await UserService.getCurrentUserProfile();
+    if (mounted) {
+      setState(() {
+        _isGuest = profile?['isGuest'] ?? false;
+      });
+    }
+  }
+
+  void _fetchManagerNames(List<String> uids) async {
+    // Only fetch if we have new UIDs
+    bool hasNew = uids.any((uid) => !_managerNames.containsKey(uid));
+    if (!hasNew) return;
+
+    await UserService.preloadUsernames(uids);
+    if (mounted) {
+      setState(() {
+        for (var uid in uids) {
+          _managerNames[uid] = UserService.getCachedUsername(uid) ?? "MANAGER ${uid.substring(0, 4)}";
+        }
+      });
+    }
   }
 
   @override
@@ -48,9 +82,7 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
 
     if (result == true) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Successfully joined league!')),
-        );
+        AppDialogs.showSuccessDialog(context, title: "WELCOME!", message: "Successfully joined the league.");
       }
     }
   }
@@ -66,12 +98,20 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
           SizedBox(height: 10.h),
           _buildModeSelector(),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildMyLeaguesTab(),
-                _buildLeaguesContent(isOnline: true),
-              ],
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: LeagueService.getUserLeaguesStream(),
+              builder: (context, snapshot) {
+                final leagues = snapshot.data ?? [];
+                final primaryLeague = leagues.isNotEmpty ? leagues.first : null;
+
+                return TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildMyLeaguesTab(leagues, snapshot.connectionState == ConnectionState.waiting),
+                    _buildLeaguesContent(league: primaryLeague),
+                  ],
+                );
+              }
             ),
           ),
           SizedBox(height: 10.h),
@@ -270,32 +310,28 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
 
   // ─── My Leagues Tab ───────────────────────────────────────────────────────
 
-  Widget _buildMyLeaguesTab() {
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: LeagueService.getUserLeaguesStream(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(color: AppColors.accentCyan));
-        }
+  Widget _buildMyLeaguesTab(List<Map<String, dynamic>> leagues, bool isLoading) {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.accentCyan));
+    }
 
-        if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
-          return _buildEmptyState();
-        }
+    // For real users, hide automated Bronze leagues to force the Join/Create flow
+    final displayLeagues = _isGuest 
+        ? leagues 
+        : leagues.where((l) => l['tier'] != 'Bronze').toList();
 
-        final leagues = snapshot.data!;
+    if (displayLeagues.isEmpty) {
+      return _buildEmptyState();
+    }
 
-        return ListView(
-          padding: EdgeInsets.all(20.w),
-          children: [
-            _buildSectionHeader("YOUR LEAGUES"),
-            SizedBox(height: 12.h),
-            ...leagues.map((league) => _buildLeagueCard(league)),
-            SizedBox(height: 20.h),
-            _buildTierCard(),
-            SizedBox(height: 20.h),
-          ],
-        );
-      },
+    return ListView(
+      padding: EdgeInsets.all(20.w),
+      children: [
+        _buildSectionHeader("YOUR LEAGUES"),
+        SizedBox(height: 12.h),
+        ...displayLeagues.map((league) => _buildLeagueCard(league)),
+        SizedBox(height: 20.h),
+      ],
     );
   }
 
@@ -309,46 +345,68 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
             Icon(Icons.emoji_events_outlined, color: Colors.white24, size: 64.w),
             SizedBox(height: 20.h),
             Text(
-              "NO LEAGUES YET",
+              "READY TO PLAY NFL?",
               style: TextStyle(color: Colors.white, fontSize: 20.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
             ),
             SizedBox(height: 8.h),
             Text(
-              "Create your first league and invite friends to join the competition.",
+              "Join an existing league or create your own to start your NFL Dynasty journey.",
               style: TextStyle(color: Colors.white38, fontSize: 14.sp, height: 1.5),
               textAlign: TextAlign.center,
             ),
             SizedBox(height: 32.h),
+            // Join Button
+            GestureDetector(
+              onTap: _showJoinLeagueSheet,
+              child: Container(
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(vertical: 14.h),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(16.h),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.login, color: Colors.white70, size: 20.w),
+                    SizedBox(width: 8.w),
+                    Text(
+                      "JOIN AN NFL LEAGUE", 
+                      style: TextStyle(color: Colors.white70, fontSize: 14.sp, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 16.h),
+            // Create Button
             GestureDetector(
               onTap: _navigateToCreateLeague,
               child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 32.w, vertical: 14.h),
+                width: double.infinity,
+                padding: EdgeInsets.symmetric(vertical: 14.h),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(colors: [AppColors.accentCyan, AppColors.createGradientPurple]),
-                  borderRadius: BorderRadius.circular(30.h),
+                  borderRadius: BorderRadius.circular(16.h),
                   boxShadow: [
                     BoxShadow(color: AppColors.accentCyan.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 5)),
                   ],
                 ),
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.add, color: Colors.white, size: 20.w),
                     SizedBox(width: 8.w),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        "CREATE YOUR FIRST LEAGUE", 
-                        style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.w900, letterSpacing: 0.5),
-                      ),
+                    Text(
+                      "CREATE NEW LEAGUE", 
+                      style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.w900, letterSpacing: 0.5),
                     ),
                   ],
                 ),
               ),
             ),
             SizedBox(height: 40.h),
-            _buildTierCard(),
-            SizedBox(height: 20.h),
           ],
         ),
       ),
@@ -362,6 +420,11 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
     final maxMembers = league['maxMembers'] as int? ?? 10;
     final draftStatus = league['draftStatus'] as String? ?? 'pending';
     final scoringType = (league['scoringType'] as String? ?? 'standard').toUpperCase().replaceAll('_', ' ');
+    
+    // Privacy Logic
+    final dynamic settingsRaw = league['settings'];
+    final settings = settingsRaw is Map ? Map<String, dynamic>.from(settingsRaw) : {};
+    final isPublic = settings['allowPublicJoin'] as bool? ?? false;
 
     final statusColor = draftStatus == 'active' ? Colors.green : draftStatus == 'complete' ? Colors.orange : AppColors.accentCyan;
 
@@ -395,10 +458,29 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
                     Expanded(
                       child: Text(name.toUpperCase(), style: TextStyle(color: Colors.white, fontSize: 16.sp, fontWeight: FontWeight.w900, letterSpacing: 0.5), overflow: TextOverflow.ellipsis),
                     ),
-                    Container(
-                      padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
-                      decoration: BoxDecoration(color: statusColor.withOpacity(0.15), borderRadius: BorderRadius.circular(20.h), border: Border.all(color: statusColor.withOpacity(0.4))),
-                      child: Text(draftStatus.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10.sp, fontWeight: FontWeight.bold)),
+                    Row(
+                      children: [
+                        // Privacy Tag
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
+                          decoration: BoxDecoration(
+                            color: isPublic ? AppColors.accentCyan.withOpacity(0.1) : Colors.white.withOpacity(0.05),
+                            borderRadius: BorderRadius.circular(20.h),
+                            border: Border.all(color: isPublic ? AppColors.accentCyan.withOpacity(0.3) : Colors.white10),
+                          ),
+                          child: Text(
+                            isPublic ? 'PUBLIC' : 'PRIVATE',
+                            style: TextStyle(color: isPublic ? AppColors.accentCyan : Colors.white38, fontSize: 8.sp, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                          ),
+                        ),
+                        SizedBox(width: 8.w),
+                        // Status Tag
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
+                          decoration: BoxDecoration(color: statusColor.withOpacity(0.15), borderRadius: BorderRadius.circular(20.h), border: Border.all(color: statusColor.withOpacity(0.4))),
+                          child: Text(draftStatus.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 8.sp, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -410,29 +492,33 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
                     _buildLeagueStat(Icons.scoreboard, scoringType, 'Scoring'),
                   ],
                 ),
-                SizedBox(height: 16.h),
-                Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.symmetric(vertical: 10.h),
-                  decoration: BoxDecoration(
-                    color: AppColors.accentCyan.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(10.h),
-                    border: Border.all(color: AppColors.accentCyan.withOpacity(0.2)),
+                if (!isPublic) ...[
+                  SizedBox(height: 16.h),
+                  Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.symmetric(vertical: 10.h),
+                    decoration: BoxDecoration(
+                      color: AppColors.accentCyan.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(10.h),
+                      border: Border.all(color: AppColors.accentCyan.withOpacity(0.2)),
+                    ),
+                    child: Column(
+                      children: [
+                        Text('JOIN CODE', style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                        SizedBox(height: 4.h),
+                        Text(joinCode, style: TextStyle(color: AppColors.accentCyan, fontSize: 22.sp, fontWeight: FontWeight.w900, letterSpacing: 6.0)),
+                      ],
+                    ),
                   ),
-                  child: Column(
-                    children: [
-                      Text('JOIN CODE', style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-                      SizedBox(height: 4.h),
-                      Text(joinCode, style: TextStyle(color: AppColors.accentCyan, fontSize: 22.sp, fontWeight: FontWeight.w900, letterSpacing: 6.0)),
-                    ],
-                  ),
-                ),
+                ],
                 SizedBox(height: 12.h),
                 GestureDetector(
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const LeagueGamesScreen()),
+                      MaterialPageRoute(
+                        builder: (_) => LeagueGamesScreen(leagueId: league['id'] as String),
+                      ),
                     );
                   },
                   child: Container(
@@ -483,7 +569,13 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
 
   // ─── Leaderboard Tab (static for now) ─────────────────────────────────────
 
-  Widget _buildLeaguesContent({required bool isOnline}) {
+  Widget _buildLeaguesContent({Map<String, dynamic>? league}) {
+    if (league == null) {
+      return _buildNoLeagueLeaderboard();
+    }
+
+    final standings = Map<String, dynamic>.from(league['standings'] ?? {});
+
     return ListView(
       padding: EdgeInsets.all(20.w),
       children: [
@@ -491,85 +583,203 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             _buildSectionHeader(_showBracket ? "PLAYOFF BRACKET" : "STANDINGS"),
-            GestureDetector(
-              onTap: () => setState(() => _showBracket = !_showBracket),
-              child: Container(
-                padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
-                decoration: BoxDecoration(
-                  color: _showBracket ? AppColors.accentCyan : Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(10.h),
-                  border: Border.all(color: _showBracket ? Colors.transparent : Colors.white10),
-                ),
-                child: Text(
-                  "BRACKET",
-                  style: TextStyle(
-                    color: _showBracket ? Colors.black : Colors.white70,
-                    fontSize: 10.sp,
-                    fontWeight: FontWeight.bold,
+            Row(
+              children: [
+                // League Chat Button
+                GestureDetector(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => LeagueChatScreen(
+                      leagueId: league['id'] as String,
+                      leagueName: league['name'] as String,
+                    ),
+                  )),
+                  child: Container(
+                    margin: EdgeInsets.only(right: 8.w),
+                    padding: EdgeInsets.all(8.w),
+                    decoration: BoxDecoration(
+                      color: AppColors.accentCyan.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10.h),
+                      border: Border.all(color: AppColors.accentCyan.withOpacity(0.4)),
+                    ),
+                    child: Icon(Icons.chat_bubble_outline_rounded, color: AppColors.accentCyan, size: 18.sp),
                   ),
                 ),
-              ),
+                // Commissioner gear — only visible to the league creator
+                if (FirebaseAuth.instance.currentUser?.uid == league['createdBy'])
+                  GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => CommissionerToolsScreen(leagueId: league['id'] as String),
+                    )),
+                    child: Container(
+                      margin: EdgeInsets.only(right: 8.w),
+                      padding: EdgeInsets.all(8.w),
+                      decoration: BoxDecoration(
+                        color: AppColors.gold.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10.h),
+                        border: Border.all(color: AppColors.gold.withOpacity(0.4)),
+                      ),
+                      child: Icon(Icons.settings_rounded, color: AppColors.gold, size: 18.sp),
+                    ),
+                  ),
+                GestureDetector(
+                  onTap: () => setState(() => _showBracket = !_showBracket),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                    decoration: BoxDecoration(
+                      color: _showBracket ? AppColors.accentCyan : Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(10.h),
+                      border: Border.all(color: _showBracket ? Colors.transparent : Colors.white10),
+                    ),
+                    child: Text(
+                      "BRACKET",
+                      style: TextStyle(
+                        color: _showBracket ? Colors.black : Colors.white70,
+                        fontSize: 10.sp,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
         SizedBox(height: 12.h),
-        _showBracket ? _buildPlayoffBracket() : _buildStandingsList(),
+        _showBracket ? _buildPlayoffBracket(league['playoffs']) : _buildStandingsList(standings, league['members'] ?? []),
         SizedBox(height: 24.h),
         _buildSectionHeader("TROPHY COLLECTION"),
         SizedBox(height: 12.h),
         _buildTrophyRow(),
         SizedBox(height: 24.h),
+        // League Tier System is at the bottom per spec
+        _buildSectionHeader("LEAGUE TIER SYSTEM"),
+        SizedBox(height: 12.h),
         _buildTierCard(),
-        SizedBox(height: 20.h),
+        SizedBox(height: 24.h),
+        _buildSectionHeader("RECENT ACTIVITY"),
+        SizedBox(height: 12.h),
+        _buildRecentActivity(league['id'] as String),
+        SizedBox(height: 100.h),
       ],
     );
   }
 
-  Widget _buildPlayoffBracket() {
-    return Container(
-      height: 300.h,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16.w),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.all(16.w),
-        children: [
-          _buildBracketRound("QUARTERFINALS", [
-            ["TEAM A", "TEAM B"],
-            ["TEAM C", "TEAM D"],
-            ["TEAM E", "TEAM F"],
-            ["TEAM G", "TEAM H"],
-          ]),
-          _buildBracketDivider(),
-          _buildBracketRound("SEMIFINALS", [
-            ["TBD", "TBD"],
-            ["TBD", "TBD"],
-          ]),
-          _buildBracketDivider(),
-          _buildBracketRound("FINALS", [
-            ["TBD", "TBD"],
-          ]),
-          _buildBracketDivider(),
-          _buildChampionRound("CHAMPION", "TBD"),
-        ],
-      ),
+  Widget _buildRecentActivity(String leagueId) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('leagues')
+          .doc(leagueId)
+          .collection('transactions')
+          .orderBy('timestamp', descending: true)
+          .limit(10)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: AppColors.accentCyan));
+        final docs = snapshot.data!.docs;
+        if (docs.isEmpty) {
+          return Container(
+            padding: EdgeInsets.all(20.w),
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16.w), border: Border.all(color: Colors.white10)),
+            child: Center(child: Text("NO RECENT TRANSACTIONS", style: TextStyle(color: Colors.white10, fontSize: 10.sp, fontWeight: FontWeight.bold))),
+          );
+        }
+
+        // Pre-fetch UIDs for names
+        final uids = <String>{};
+        for (var doc in docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          if (data['userId'] != null) uids.add(data['userId'] as String);
+          if (data['fromUid'] != null) uids.add(data['fromUid'] as String);
+          if (data['toUid'] != null) uids.add(data['toUid'] as String);
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) => _fetchManagerNames(uids.toList()));
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data() as Map<String, dynamic>;
+            return _buildTransactionCard(data);
+          },
+        );
+      },
     );
   }
 
-  Widget _buildBracketRound(String title, List<List<String>> matchups) {
-    return SizedBox(
-      width: 140.w,
-      child: Column(
+  Widget _buildTransactionCard(Map<String, dynamic> data) {
+    final type = data['type'] as String? ?? 'unknown';
+    final timestamp = data['timestamp'] as Timestamp?;
+    final dateStr = timestamp != null ? "${timestamp.toDate().month}/${timestamp.toDate().day}" : "";
+
+    IconData icon;
+    Color color;
+    String title = "";
+    String detail = "";
+
+    if (type == 'trade') {
+      icon = Icons.swap_horiz;
+      color = AppColors.accentCyan;
+      final fromName = _managerNames[data['fromUid']] ?? "MANAGER";
+      final toName = _managerNames[data['toUid']] ?? "MANAGER";
+      title = "TRADE COMPLETED";
+      
+      final offP = List<String>.from(data['offeringPlayers'] ?? []);
+      final reqP = List<String>.from(data['requestingPlayers'] ?? []);
+      final offK = List<String>.from(data['offeringPicks'] ?? []);
+      final reqK = List<String>.from(data['requestingPicks'] ?? []);
+
+      detail = "$fromName sent ${[...offP, ...offK].join(", ")} to $toName for ${[...reqP, ...reqK].join(", ")}";
+    } else if (type == 'waiver') {
+      icon = Icons.star;
+      color = Colors.orangeAccent;
+      final name = _managerNames[data['userId']] ?? "MANAGER";
+      title = "WAIVER ADDITION";
+      detail = "$name added ${data['playerName']} (Bid: \$${data['bidAmount']})";
+    } else if (type == 'drop') {
+      icon = Icons.content_cut;
+      color = Colors.redAccent;
+      final name = _managerNames[data['userId']] ?? "MANAGER";
+      title = "PLAYER DROPPED";
+      detail = "$name dropped ${data['playerName']} (${data['pos']})";
+    } else {
+      icon = Icons.info_outline;
+      color = Colors.white24;
+      title = "TRANSACTION";
+      detail = "League update processed.";
+    }
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 10.h),
+      padding: EdgeInsets.all(12.w),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12.h),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold)),
-          SizedBox(height: 12.h),
+          Container(
+            padding: EdgeInsets.all(8.w),
+            decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
+            child: Icon(icon, color: color, size: 16.sp),
+          ),
+          SizedBox(width: 12.w),
           Expanded(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: matchups.map((m) => _buildBracketMatchup(m[0], m[1])).toList(),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(title, style: TextStyle(color: color.withOpacity(0.8), fontSize: 9.sp, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                    Text(dateStr, style: TextStyle(color: Colors.white24, fontSize: 8.sp)),
+                  ],
+                ),
+                SizedBox(height: 4.h),
+                Text(detail, style: TextStyle(color: Colors.white, fontSize: 11.sp, height: 1.3, fontWeight: FontWeight.w500)),
+              ],
             ),
           ),
         ],
@@ -577,7 +787,83 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
     );
   }
 
-  Widget _buildChampionRound(String title, String teamName) {
+  Widget _buildPlayoffBracket(Map<String, dynamic>? playoffs) {
+    if (playoffs == null) {
+      return Container(
+        height: 200.h,
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16.w), border: Border.all(color: Colors.white10)),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.lock_outline, color: Colors.white10, size: 40.w),
+              SizedBox(height: 12.h),
+              Text("PLAYOFFS BEGIN AFTER WEEK 8", style: TextStyle(color: Colors.white38, fontSize: 12.sp, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+              SizedBox(height: 4.h),
+              Text("TOP 4 TEAMS QUALIFY", style: TextStyle(color: Colors.white10, fontSize: 10.sp)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Trigger name fetch for playoff teams
+    final playoffUids = <String>{};
+    for (var m in List<Map<String, dynamic>>.from(playoffs['semifinals'] ?? [])) {
+      playoffUids.add(m['team1']); playoffUids.add(m['team2']);
+    }
+    final dynamic finalsRaw = playoffs['finals'];
+    final Map<String, dynamic>? finals = finalsRaw is Map ? Map<String, dynamic>.from(finalsRaw) : null;
+    if (finals != null) {
+      if (finals['team1'] != null) playoffUids.add(finals['team1']);
+      if (finals['team2'] != null) playoffUids.add(finals['team2']);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchManagerNames(playoffUids.toList());
+    });
+
+    return Container(
+      height: 320.h,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16.w),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.all(20.w),
+        children: [
+          _buildBracketRound("SEMIFINALS", List<Map<String, dynamic>>.from(playoffs['semifinals'])),
+          _buildBracketDivider(),
+          _buildBracketRound("FINALS", [playoffs['finals']]),
+          _buildBracketDivider(),
+          _buildChampionRound("CHAMPION", playoffs['champion']),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBracketRound(String title, List<Map<String, dynamic>> matches) {
+    return SizedBox(
+      width: 150.w,
+      child: Column(
+        children: [
+          Text(title, style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+          SizedBox(height: 16.h),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: matches.map((m) => _buildBracketMatchup(m)).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChampionRound(String title, String? championUid) {
+    final name = championUid != null ? (_managerNames[championUid] ?? "LOADING...") : "TBD";
+    
     return SizedBox(
       width: 160.w,
       child: Column(
@@ -602,14 +888,14 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
                     Icon(Icons.emoji_events, color: AppColors.gold, size: 48.w),
                     SizedBox(height: 12.h),
                     Text(
-                      teamName.toUpperCase(),
+                      name.toUpperCase(),
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.w900),
                     ),
                     SizedBox(height: 4.h),
                     Text(
-                      "WINNER",
-                      style: TextStyle(color: AppColors.gold, fontSize: 9.sp, fontWeight: FontWeight.bold),
+                      championUid != null ? "WINNER" : "WAITING",
+                      style: TextStyle(color: championUid != null ? AppColors.gold : Colors.white24, fontSize: 9.sp, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -621,30 +907,63 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
     );
   }
 
-  Widget _buildBracketMatchup(String team1, String team2) {
+  Widget _buildBracketMatchup(Map<String, dynamic> match) {
+    final t1 = match['team1'] as String?;
+    final t2 = match['team2'] as String?;
+    final s1 = (match['score1'] as num? ?? 0.0).toDouble();
+    final s2 = (match['score2'] as num? ?? 0.0).toDouble();
+    final winner = match['winner'] as String?;
+
     return Container(
-      padding: EdgeInsets.symmetric(vertical: 4.h, horizontal: 10.w),
+      padding: EdgeInsets.symmetric(vertical: 8.h, horizontal: 10.w),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.03),
-        borderRadius: BorderRadius.circular(8.h),
+        borderRadius: BorderRadius.circular(12.h),
         border: Border.all(color: Colors.white10),
       ),
       child: Column(
         children: [
-          _buildBracketTeam(team1, isWinner: team1 != "TBD"),
-          Divider(color: Colors.white10, height: 4.h),
-          _buildBracketTeam(team2, isWinner: false),
+          _buildBracketTeam(t1, score: s1, isWinner: winner != null && winner == t1),
+          SizedBox(height: 6.h),
+          Divider(color: Colors.white.withOpacity(0.05), height: 1.h),
+          SizedBox(height: 6.h),
+          _buildBracketTeam(t2, score: s2, isWinner: winner != null && winner == t2),
         ],
       ),
     );
   }
 
-  Widget _buildBracketTeam(String name, {bool isWinner = false}) {
+  Widget _buildBracketTeam(String? uid, {double score = 0.0, bool isWinner = false}) {
+    final name = uid != null ? (_managerNames[uid] ?? "LOADING...") : "TBD";
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Flexible(child: Text(name, style: TextStyle(color: isWinner ? Colors.white : Colors.white54, fontSize: 10.sp, fontWeight: isWinner ? FontWeight.bold : FontWeight.normal), overflow: TextOverflow.ellipsis)),
-        if (isWinner) Icon(Icons.check_circle, color: AppColors.accentCyan, size: 10.w),
+        Expanded(
+          child: Text(
+            name,
+            style: TextStyle(
+              color: uid == null ? Colors.white10 : (isWinner ? Colors.white : Colors.white60),
+              fontSize: 10.sp,
+              fontWeight: isWinner ? FontWeight.w900 : FontWeight.bold,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (uid != null && score > 0)
+          Text(
+            score.toStringAsFixed(1),
+            style: TextStyle(
+              color: isWinner ? AppColors.accentCyan : Colors.white24,
+              fontSize: 9.sp,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        if (isWinner) 
+          Padding(
+            padding: EdgeInsets.only(left: 4.w),
+            child: Icon(Icons.check_circle, color: AppColors.accentCyan, size: 10.w),
+          ),
       ],
     );
   }
@@ -667,7 +986,32 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
     );
   }
 
-  Widget _buildStandingsList() {
+  Widget _buildStandingsList(Map<String, dynamic> standingsData, List<dynamic> memberUids) {
+    if (standingsData.isEmpty) {
+      return Container(
+        height: 100.h,
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16.w), border: Border.all(color: Colors.white10)),
+        child: const Center(child: Text("No games played yet.", style: TextStyle(color: Colors.white38))),
+      );
+    }
+
+    // Convert map to list and sort by Wins desc, then PF desc
+    final List<MapEntry<String, dynamic>> entries = standingsData.entries.toList();
+    entries.sort((a, b) {
+      final wA = a.value['w'] as int? ?? 0;
+      final wB = b.value['w'] as int? ?? 0;
+      if (wA != wB) return wB.compareTo(wA);
+      
+      final pfA = (a.value['pf'] as num? ?? 0).toDouble();
+      final pfB = (b.value['pf'] as num? ?? 0).toDouble();
+      return pfB.compareTo(pfA);
+    });
+
+    // Trigger name fetch for all teams in standings
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchManagerNames(entries.map((e) => e.key).toList());
+    });
+
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -690,15 +1034,41 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
                 SizedBox(width: 45.w, child: Center(child: Text("W-L", style: _standingHeaderStyle))),
                 SizedBox(width: 40.w, child: Center(child: Text("PF", style: _standingHeaderStyle))),
                 SizedBox(width: 40.w, child: Center(child: Text("PA", style: _standingHeaderStyle))),
-                SizedBox(width: 45.w, child: Center(child: Text("STATUS", style: _standingHeaderStyle))),
+                SizedBox(width: 50.w, child: Center(child: Text("STATUS", style: _standingHeaderStyle))),
               ],
             ),
           ),
-          _buildStandingRow(rank: "1", team: "CYBER TITANS", record: "12-0", pf: "245.5", pa: "180.2", status: "Z", isHighlighted: false),
-          _buildStandingRow(rank: "2", team: "NEON KNIGHTS", record: "10-2", pf: "210.8", pa: "195.4", status: "X", isHighlighted: false),
-          _buildStandingRow(rank: "3", team: "DYNASTY WARRIORS", record: "10-2", pf: "205.1", pa: "188.9", status: "*", isHighlighted: false),
-          _buildStandingRow(rank: "4", team: "GRIDIRON KINGS", record: "9-3", pf: "198.4", pa: "202.1", status: "*", isHighlighted: true),
-          _buildStandingRow(rank: "5", team: "SHADOW RAIDERS", record: "8-4", pf: "185.2", pa: "210.3", status: "E", isHighlighted: false, isLast: true),
+          ...List.generate(entries.length, (index) {
+            final entry = entries[index];
+            final uid = entry.key;
+            final data = entry.value;
+            final isUser = uid == LeagueService.currentUser?.uid;
+
+            return _buildStandingRow(
+              rank: (index + 1).toString(),
+              team: _managerNames[uid] ?? "MANAGER ${uid.substring(0, 4)}",
+              record: "${data['w']}-${data['l']}",
+              pf: (data['pf'] as num? ?? 0).toStringAsFixed(1),
+              pa: (data['pa'] as num? ?? 0).toStringAsFixed(1),
+              status: index == 0 ? "Z" : (index == 1 || index == 2) ? "X" : index == 3 ? "*" : "E",
+              isHighlighted: isUser,
+              isLast: index == entries.length - 1,
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoLeagueLeaderboard() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.leaderboard_outlined, color: Colors.white24, size: 64.w),
+          SizedBox(height: 16.h),
+          Text("JOIN A LEAGUE", style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.bold)),
+          Text("Standings will appear here once you join.", style: TextStyle(color: Colors.white38, fontSize: 12.sp)),
         ],
       ),
     );
@@ -734,14 +1104,19 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
           SizedBox(width: 40.w, child: Center(child: Text(pf, style: TextStyle(color: Colors.white70, fontSize: 11.sp)))),
           SizedBox(width: 40.w, child: Center(child: Text(pa, style: TextStyle(color: Colors.white38, fontSize: 11.sp)))),
           SizedBox(
-            width: 45.w,
+            width: 50.w,
             child: Center(
               child: Text(
+                // STATUS: only show when NOT in bracket view
                 _showBracket ? "" : status,
                 style: TextStyle(
-                  color: isHighlighted ? AppColors.accentCyan : Colors.white24,
+                  color: status == "Z" ? AppColors.gold
+                    : status == "X" ? AppColors.accentCyan
+                    : status == "*" ? Colors.greenAccent
+                    : status == "E" ? Colors.redAccent
+                    : Colors.white24,
                   fontWeight: FontWeight.w900,
-                  fontSize: 14.sp,
+                  fontSize: 13.sp,
                 ),
               ),
             ),
@@ -752,30 +1127,50 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
   }
 
   Widget _buildTrophyRow() {
-    return Row(
-      children: [
-        _buildTrophyItem(Icons.emoji_events, "CHAMPION", "2025"),
-        SizedBox(width: 12.w),
-        _buildTrophyItem(Icons.military_tech, "MVP", "2024"),
-        SizedBox(width: 12.w),
-        _buildTrophyItem(Icons.stars, "ALL-STAR", "2024"),
-        SizedBox(width: 12.w),
-        _buildTrophyItem(Icons.workspace_premium, "LEGEND", "2023"),
-      ],
-    );
-  }
-
-  Widget _buildTrophyItem(IconData icon, String label, String year) {
-    return Expanded(
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const TrophyRoomScreen()));
+      },
       child: Container(
-        padding: EdgeInsets.symmetric(vertical: 12.h),
-        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16.w), border: Border.all(color: Colors.white10)),
-        child: Column(
+        padding: EdgeInsets.all(20.w),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF2B2B2B), Color(0xFF1E1E1E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(24.w),
+          border: Border.all(color: AppColors.gold.withOpacity(0.3)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.gold.withOpacity(0.05),
+              blurRadius: 15,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Row(
           children: [
-            Icon(icon, color: AppColors.gold, size: 24.w),
-            SizedBox(height: 8.h),
-            Text(label, style: TextStyle(color: Colors.white70, fontSize: 8.sp, fontWeight: FontWeight.bold)),
-            Text(year, style: TextStyle(color: Colors.white24, fontSize: 8.sp)),
+            Container(
+              padding: EdgeInsets.all(12.w),
+              decoration: BoxDecoration(
+                color: AppColors.gold.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.emoji_events, color: AppColors.gold, size: 30.w),
+            ),
+            SizedBox(width: 16.w),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("TROPHY ROOM", style: TextStyle(color: Colors.white, fontSize: 16.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0)),
+                  SizedBox(height: 4.h),
+                  Text("View historical championships and accolades", style: TextStyle(color: Colors.white54, fontSize: 11.sp)),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios, color: Colors.white24, size: 16.w),
           ],
         ),
       ),

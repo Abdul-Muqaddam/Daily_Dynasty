@@ -41,6 +41,17 @@ dependencies:
   firebase_storage: ^12.4.1
   google_sign_in: ^6.2.1
   shared_preferences: ^2.2.2
+  intl: ^0.20.2
+  firebase_messaging: ^15.1.5
+  flutter_local_notifications: ^18.0.1
+  http: ^1.6.0
+  cached_network_image: ^3.4.1
+  connectivity_plus: ^6.1.4
+  permission_handler: ^11.3.1
+  path: ^1.9.1
+  record: ^6.2.0
+  audioplayers: ^6.1.0
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:

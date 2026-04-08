@@ -3,7 +3,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'core/colors.dart';
 import 'screens/splash_screen.dart';
-import 'core/constants.dart';
+import 'screens/customization_screen.dart';
+import 'services/notification_service.dart';
+import 'widgets/connectivity_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,7 +15,10 @@ Future<void> main() async {
   
   // Disable the default Material 3 focus ring globally
   FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTouch;
-  
+
+  // Initialize FCM push notifications in background so it doesn't block startup
+  NotificationService.initialize();
+
   runApp(const MyApp());
 }
 
@@ -58,7 +63,10 @@ class MyApp extends StatelessWidget {
           selectionHandleColor: AppColors.accentCyan,
         ),
       ),
-      home: const SplashScreen(),
+      home: const ConnectivityWrapper(child: SplashScreen()),
+      routes: {
+        '/customization': (context) => const CustomizationScreen(),
+      },
     );
   }
 }

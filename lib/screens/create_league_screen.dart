@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../core/colors.dart';
 import '../../core/responsive_helper.dart';
 import '../../services/league_service.dart';
+import '../../widgets/app_dialogs.dart';
 
 class CreateLeagueScreen extends StatefulWidget {
   const CreateLeagueScreen({super.key});
@@ -18,6 +19,8 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
 
   int _currentStep = 0;
   int _maxMembers = 10;
+  String _leagueType = 'redraft';
+  String _draftType = 'snake';
   String _scoringType = 'standard';
   bool _allowPublicJoin = false;
   bool _isLoading = false;
@@ -53,12 +56,10 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
 
   void _nextStep() {
     if (_currentStep == 0 && _nameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a league name')),
-      );
+      AppDialogs.showPremiumErrorDialog(context, message: "Please enter a league name.");
       return;
     }
-    if (_currentStep < 2) {
+    if (_currentStep < 4) {
       setState(() => _currentStep++);
       _pageController.animateToPage(
         _currentStep,
@@ -84,6 +85,8 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
     try {
       final leagueId = await LeagueService.createLeague(
         name: _nameController.text.trim(),
+        leagueType: _leagueType,
+        draftType: _draftType,
         maxMembers: _maxMembers,
         scoringType: _scoringType,
         allowPublicJoin: _allowPublicJoin,
@@ -104,9 +107,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
       _codeAnimController.forward();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error creating league: $e')),
-        );
+        AppDialogs.showPremiumErrorDialog(context, message: "Error creating league: $e");
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -176,6 +177,8 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
                       _buildStep1(),
                       _buildStep2(),
                       _buildStep3(),
+                      _buildStep4(),
+                      _buildStep5(),
                     ],
                   ),
                 ),
@@ -192,7 +195,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 16.h),
       child: Row(
-        children: List.generate(3, (i) {
+        children: List.generate(5, (i) {
           final isActive = i == _currentStep;
           final isDone = i < _currentStep;
           return Expanded(
@@ -260,9 +263,219 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
     );
   }
 
-  // ─── Step 2: Settings ──────────────────────────────────────────────────────
+  // ─── Step 2: League Type ──────────────────────────────────────────────────
 
   Widget _buildStep2() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(24.w),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: 20.h),
+          Icon(Icons.category, color: AppColors.accentCyan, size: 48.w),
+          SizedBox(height: 20.h),
+          Text(
+            'Choose League Type',
+            style: TextStyle(color: Colors.white, fontSize: 28.sp, fontWeight: FontWeight.w900),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            'You can change it later in the settings\n(except Chopped)',
+            style: TextStyle(color: AppColors.accentCyan, fontSize: 13.sp, fontWeight: FontWeight.bold),
+          ),
+          SizedBox(height: 32.h),
+
+          _buildTypeOption(
+            'redraft', 
+            'Redraft', 
+            'Everyone starts from scratch every year. Draft a new team each season.',
+            Icons.refresh,
+          ),
+          _buildTypeOption(
+            'keeper', 
+            'Keeper', 
+            'Managers can retain a specific number of players from their previous roster.',
+            Icons.save,
+          ),
+          _buildTypeOption(
+            'dynasty', 
+            'Dynasty', 
+            'The true marathon. Keep your entire roster year-over-year.',
+            Icons.history,
+          ),
+          _buildTypeOption(
+            'chopped', 
+            'Chopped', 
+            'High-stakes elimination mode. Once set, this cannot be changed.',
+            Icons.whatshot,
+            isPermanent: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTypeOption(String value, String label, String description, IconData icon, {bool isPermanent = false}) {
+    final isSelected = _leagueType == value;
+    return GestureDetector(
+      onTap: () => setState(() => _leagueType = value),
+      child: Container(
+        margin: EdgeInsets.only(bottom: 16.h),
+        padding: EdgeInsets.all(20.w),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.accentCyan.withOpacity(0.1) : Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(16.h),
+          border: Border.all(
+            color: isSelected ? AppColors.accentCyan : Colors.white10,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(12.w),
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.accentCyan : Colors.white10,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: isSelected ? Colors.black : Colors.white24, size: 24.w),
+            ),
+            SizedBox(width: 16.w),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(label, style: TextStyle(color: isSelected ? Colors.white : Colors.white70, fontSize: 18.sp, fontWeight: FontWeight.w900)),
+                      if (isPermanent) ...[
+                        SizedBox(width: 8.w),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                          decoration: BoxDecoration(color: Colors.redAccent.withOpacity(0.2), borderRadius: BorderRadius.circular(4.h)),
+                          child: Text("PERMANENT", style: TextStyle(color: Colors.redAccent, fontSize: 8.sp, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ],
+                  ),
+                  SizedBox(height: 4.h),
+                  Text(description, style: TextStyle(color: Colors.white38, fontSize: 12.sp, height: 1.3)),
+                ],
+              ),
+            ),
+            if (isSelected) 
+              Icon(Icons.check_circle, color: AppColors.accentCyan, size: 24.w),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Step 3: Draft Type ───────────────────────────────────────────────────
+
+  Widget _buildStep3() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(24.w),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: 20.h),
+          Icon(Icons.format_list_numbered, color: AppColors.accentCyan, size: 48.w),
+          SizedBox(height: 20.h),
+          Text(
+            'Choose Draft Type',
+            style: TextStyle(color: Colors.white, fontSize: 28.sp, fontWeight: FontWeight.w900),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            'Determine how your initial roster is built.',
+            style: TextStyle(color: Colors.white54, fontSize: 14.sp),
+          ),
+          SizedBox(height: 32.h),
+
+          _buildDraftOption(
+            'snake', 
+            'Snake Draft', 
+            'Draft in a specified or randomized order; each round the order reverses. Most common way to draft.',
+            Icons.swap_calls,
+            isRecommended: true,
+          ),
+          _buildDraftOption(
+            'linear', 
+            'Linear Draft', 
+            'Standard order that remains constant every round (e.g. 1-10, 1-10).',
+            Icons.format_align_left,
+          ),
+          _buildDraftOption(
+            'auction', 
+            'Auction Draft', 
+            'Every manager has a budget to bid on players. High stakes and high strategy.',
+            Icons.gavel,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDraftOption(String value, String label, String description, IconData icon, {bool isRecommended = false}) {
+    final isSelected = _draftType == value;
+    return GestureDetector(
+      onTap: () => setState(() => _draftType = value),
+      child: Container(
+        margin: EdgeInsets.only(bottom: 16.h),
+        padding: EdgeInsets.all(20.w),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.accentCyan.withOpacity(0.1) : Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(16.h),
+          border: Border.all(
+            color: isSelected ? AppColors.accentCyan : Colors.white10,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(12.w),
+              decoration: BoxDecoration(
+                color: isSelected ? AppColors.accentCyan : Colors.white10,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: isSelected ? Colors.black : Colors.white24, size: 24.w),
+            ),
+            SizedBox(width: 16.w),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(label, style: TextStyle(color: isSelected ? Colors.white : Colors.white70, fontSize: 18.sp, fontWeight: FontWeight.w900)),
+                      if (isRecommended) ...[
+                        SizedBox(width: 8.w),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                          decoration: BoxDecoration(color: AppColors.accentCyan.withOpacity(0.2), borderRadius: BorderRadius.circular(4.h)),
+                          child: Text("MOST COMMON", style: TextStyle(color: AppColors.accentCyan, fontSize: 8.sp, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ],
+                  ),
+                  SizedBox(height: 4.h),
+                  Text(description, style: TextStyle(color: Colors.white38, fontSize: 12.sp, height: 1.3)),
+                ],
+              ),
+            ),
+            if (isSelected) 
+              Icon(Icons.check_circle, color: AppColors.accentCyan, size: 24.w),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Step 4: Settings ──────────────────────────────────────────────────────
+
+  Widget _buildStep4() {
     return SingleChildScrollView(
       padding: EdgeInsets.all(24.w),
       child: Column(
@@ -407,9 +620,9 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
     );
   }
 
-  // ─── Step 3: Confirm ───────────────────────────────────────────────────────
+  // ─── Step 5: Confirm ───────────────────────────────────────────────────────
 
-  Widget _buildStep3() {
+  Widget _buildStep5() {
     final name = _nameController.text.trim().isEmpty ? 'Your League' : _nameController.text.trim();
     return SingleChildScrollView(
       padding: EdgeInsets.all(24.w),
@@ -443,6 +656,10 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
               children: [
                 _buildSummaryRow('League Name', name, Icons.emoji_events),
                 Divider(color: Colors.white10, height: 24.h),
+                _buildSummaryRow('League Type', _leagueType.toUpperCase(), Icons.category),
+                Divider(color: Colors.white10, height: 24.h),
+                _buildSummaryRow('Draft Type', _draftType.toUpperCase(), Icons.format_list_numbered),
+                Divider(color: Colors.white10, height: 24.h),
                 _buildSummaryRow('Max Members', '$_maxMembers players', Icons.group),
                 Divider(color: Colors.white10, height: 24.h),
                 _buildSummaryRow('Scoring', _scoringType.toUpperCase().replaceAll('_', ' '), Icons.scoreboard),
@@ -475,7 +692,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
   // ─── Bottom Button ─────────────────────────────────────────────────────────
 
   Widget _buildBottomButton() {
-    final isLastStep = _currentStep == 2;
+    final isLastStep = _currentStep == 4;
     return Container(
       padding: EdgeInsets.fromLTRB(24.w, 12.h, 24.w, 32.h),
       child: Container(
@@ -546,46 +763,72 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
             textAlign: TextAlign.center,
           ),
           SizedBox(height: 8.h),
-          Text('Your league is live!', style: TextStyle(color: Colors.white54, fontSize: 16.sp)),
+          Text(_allowPublicJoin ? 'Discovery Board Active!' : 'Your league is live!', style: TextStyle(color: Colors.white54, fontSize: 16.sp)),
 
           SizedBox(height: 40.h),
 
-          Text('JOIN CODE', style: TextStyle(color: Colors.white38, fontSize: 12.sp, fontWeight: FontWeight.bold, letterSpacing: 2.0)),
-          SizedBox(height: 12.h),
-          ScaleTransition(
-            scale: _codeAnim,
-            child: Container(
-              padding: EdgeInsets.symmetric(horizontal: 40.w, vertical: 20.h),
+          if (_allowPublicJoin) ...[
+            Container(
+              padding: EdgeInsets.all(24.w),
               decoration: BoxDecoration(
-                color: AppColors.leagueCardBg,
+                color: AppColors.accentCyan.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(20.h),
-                border: Border.all(color: AppColors.accentCyan, width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.accentCyan.withOpacity(0.3),
-                    blurRadius: 20,
-                    spreadRadius: 4,
+                border: Border.all(color: AppColors.accentCyan.withOpacity(0.1)),
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.public, color: AppColors.accentCyan, size: 40.w),
+                  SizedBox(height: 16.h),
+                  Text(
+                    'PUBLIC ACCESS ENABLED',
+                    style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
+                  ),
+                  SizedBox(height: 8.h),
+                  Text(
+                    'Managers can now find and join your league instantly from the Discovery board. No join code required.',
+                    style: TextStyle(color: Colors.white38, fontSize: 12.sp, height: 1.5),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
-              child: Text(
-                _createdJoinCode ?? '------',
-                style: TextStyle(
-                  color: AppColors.accentCyan,
-                  fontSize: 36.sp,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 8.0,
+            ),
+          ] else ...[
+            Text('JOIN CODE', style: TextStyle(color: Colors.white38, fontSize: 12.sp, fontWeight: FontWeight.bold, letterSpacing: 2.0)),
+            SizedBox(height: 12.h),
+            ScaleTransition(
+              scale: _codeAnim,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 40.w, vertical: 20.h),
+                decoration: BoxDecoration(
+                  color: AppColors.leagueCardBg,
+                  borderRadius: BorderRadius.circular(20.h),
+                  border: Border.all(color: AppColors.accentCyan, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.accentCyan.withOpacity(0.3),
+                      blurRadius: 20,
+                      spreadRadius: 4,
+                    ),
+                  ],
+                ),
+                child: Text(
+                  _createdJoinCode ?? '------',
+                  style: TextStyle(
+                    color: AppColors.accentCyan,
+                    fontSize: 36.sp,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 8.0,
+                  ),
                 ),
               ),
             ),
-          ),
-
-          SizedBox(height: 16.h),
-          Text('Share this code with friends to invite them.', style: TextStyle(color: Colors.white38, fontSize: 13.sp), textAlign: TextAlign.center),
+            SizedBox(height: 16.h),
+            Text('Share this code with friends to invite them.', style: TextStyle(color: Colors.white38, fontSize: 13.sp), textAlign: TextAlign.center),
+          ],
 
           SizedBox(height: 32.h),
 
-          // Copy Button
+          // Action Button
           Container(
             width: double.infinity,
             height: 52.h,
@@ -597,19 +840,30 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
               color: Colors.transparent,
               child: InkWell(
                 onTap: () {
-                  Clipboard.setData(ClipboardData(text: _createdJoinCode ?? ''));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Join code copied to clipboard!')),
-                  );
+                  if (_allowPublicJoin) {
+                    Navigator.pop(context);
+                  } else {
+                    Clipboard.setData(ClipboardData(text: _createdJoinCode ?? ''));
+                    if (mounted) {
+                      AppDialogs.showSuccessDialog(
+                        context,
+                        title: "COPIED",
+                        message: "Join code copied to clipboard!",
+                      );
+                    }
+                  }
                 },
                 borderRadius: BorderRadius.circular(14.h),
                 child: Center(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.copy, color: Colors.white, size: 20.w),
+                      Icon(_allowPublicJoin ? Icons.check_circle : Icons.copy, color: Colors.white, size: 20.w),
                       SizedBox(width: 8.w),
-                      Text('COPY JOIN CODE', style: TextStyle(color: Colors.white, fontSize: 15.sp, fontWeight: FontWeight.w900)),
+                      Text(
+                        _allowPublicJoin ? 'GET STARTED' : 'COPY JOIN CODE',
+                        style: TextStyle(color: Colors.white, fontSize: 15.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
+                      ),
                     ],
                   ),
                 ),
@@ -617,10 +871,11 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
             ),
           ),
           SizedBox(height: 16.h),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Back to League', style: TextStyle(color: Colors.white54, fontSize: 14.sp)),
-          ),
+          if (!_allowPublicJoin)
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Done', style: TextStyle(color: Colors.white54, fontSize: 14.sp)),
+            ),
         ],
       ),
     );

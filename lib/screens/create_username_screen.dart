@@ -9,6 +9,7 @@ import '../core/constants.dart';
 import '../core/responsive_helper.dart';
 import 'matches_screen.dart';
 import 'age_verification_screen.dart';
+import '../widgets/app_dialogs.dart';
 
 class CreateUsernameScreen extends StatefulWidget {
   const CreateUsernameScreen({super.key});
@@ -72,9 +73,7 @@ class _CreateUsernameScreenState extends State<CreateUsernameScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error picking image: $e")),
-        );
+        AppDialogs.showPremiumErrorDialog(context, message: "Error picking image. Please try again.");
       }
     }
   }
@@ -151,9 +150,7 @@ class _CreateUsernameScreenState extends State<CreateUsernameScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error saving profile: $e")),
-        );
+        AppDialogs.showPremiumErrorDialog(context, message: "Error saving profile. Please check your connection.");
       }
     } finally {
       if (mounted) {

@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
 import '../services/coin_service.dart';
+import '../services/check_in_service.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/notification_badge.dart';
+import '../widgets/countdown_timer.dart';
 
 class StoreScreen extends StatefulWidget {
-  const StoreScreen({super.key});
+  final bool isEmbedded;
+  const StoreScreen({super.key, this.isEmbedded = false});
 
   @override
   State<StoreScreen> createState() => _StoreScreenState();
@@ -72,20 +76,10 @@ class _StoreScreenState extends State<StoreScreen> {
     try {
       await CoinService.spendCoins(item['cost'] as int, 'store:${item['name']}');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.accentCyan,
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.black),
-                const SizedBox(width: 10),
-                Text(
-                  '${item['name']} purchased!',
-                  style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
+        AppDialogs.showSuccessDialog(
+          context,
+          title: "PURCHASE SUCCESSFUL",
+          message: "${item['name']} added to your inventory.",
         );
       }
     } catch (e) {
@@ -109,7 +103,7 @@ class _StoreScreenState extends State<StoreScreen> {
     ResponsiveHelper.init(context);
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
+      appBar: widget.isEmbedded ? null : AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
         leading: IconButton(
@@ -188,7 +182,24 @@ class _StoreScreenState extends State<StoreScreen> {
       ),
       child: Row(
         children: [
-          Icon(Icons.local_fire_department, color: Colors.white, size: 32.w),
+           StreamBuilder<bool>(
+            stream: CheckInService.checkInStatusStream(),
+            builder: (context, snapshot) {
+              final isReady = snapshot.data ?? false;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(Icons.local_fire_department, color: Colors.white, size: 32.w),
+                  if (isReady)
+                    Positioned(
+                      top: -5.h,
+                      right: -5.w,
+                      child: const PulsingNotificationDot(),
+                    ),
+                ],
+              );
+            }
+          ),
           SizedBox(width: 12.w),
           Expanded(
             child: Column(
@@ -203,9 +214,20 @@ class _StoreScreenState extends State<StoreScreen> {
                     letterSpacing: 0.5,
                   ),
                 ),
-                Text(
-                  "Earn 50 coins every day by checking in!",
-                  style: TextStyle(color: Colors.white70, fontSize: 11.sp),
+                StreamBuilder<bool>(
+                  stream: CheckInService.checkInStatusStream(),
+                  builder: (context, snap) {
+                    if (snap.data == false) {
+                      return CheckInCountdown(
+                        prefix: "Next reward in ",
+                        style: TextStyle(color: Colors.white70, fontSize: 11.sp),
+                      );
+                    }
+                    return Text(
+                      "Earn 50 coins every day by checking in!",
+                      style: TextStyle(color: Colors.white70, fontSize: 11.sp),
+                    );
+                  }
                 ),
               ],
             ),

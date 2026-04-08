@@ -36,7 +36,7 @@ class AuthService {
             'email': user.email ?? '',
             'registrationCompleted': false,
             'createdAt': FieldValue.serverTimestamp(),
-          });
+          }, SetOptions(merge: true));
         }
       }
 
@@ -44,6 +44,33 @@ class AuthService {
     } catch (e) {
       print('Error during Google Sign-In: $e');
       return null;
+    }
+  }
+
+  /// Signs in the user anonymously (for guest mode).
+  static Future<User?> signInAnonymously() async {
+    try {
+      final UserCredential userCredential = await _auth.signInAnonymously();
+      final User? user = userCredential.user;
+
+      if (user != null) {
+        // Create user document if it doesn't exist
+        final userDoc = await _db.collection('users').doc(user.uid).get();
+        if (!userDoc.exists) {
+          await _db.collection('users').doc(user.uid).set({
+            'username': 'Guest_${user.uid.substring(0, 5)}',
+            'fullName': 'Guest User',
+            'registrationCompleted': true, // Guest is already "ready"
+            'createdAt': FieldValue.serverTimestamp(),
+            'isGuest': true,
+            'coins': 0, // Initialize coins
+          }, SetOptions(merge: true));
+        }
+      }
+      return user;
+    } catch (e) {
+      print('Error during Anonymous Sign-In: $e');
+      rethrow;
     }
   }
 

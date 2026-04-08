@@ -1,9 +1,33 @@
 import 'package:flutter/material.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/user_service.dart';
 
-class LeagueGamesScreen extends StatelessWidget {
-  const LeagueGamesScreen({super.key});
+class LeagueGamesScreen extends StatefulWidget {
+  final String leagueId;
+  const LeagueGamesScreen({super.key, required this.leagueId});
+
+  @override
+  State<LeagueGamesScreen> createState() => _LeagueGamesScreenState();
+}
+
+class _LeagueGamesScreenState extends State<LeagueGamesScreen> {
+  final Map<String, String> _managerNames = {};
+
+  void _fetchManagerNames(List<String> uids) async {
+    bool hasNew = uids.any((uid) => !_managerNames.containsKey(uid));
+    if (!hasNew) return;
+
+    await UserService.preloadUsernames(uids);
+    if (mounted) {
+      setState(() {
+        for (var uid in uids) {
+          _managerNames[uid] = UserService.getCachedUsername(uid) ?? "MANAGER ${uid.substring(0, 4)}";
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,34 +52,66 @@ class LeagueGamesScreen extends StatelessWidget {
         ),
         centerTitle: true,
       ),
-      body: ListView(
-        padding: EdgeInsets.all(20.w),
-        children: [
-          _buildLeagueMatchCard(
-            team1: "GRIDIRON KINGS",
-            team2: "CYBER TITANS",
-            score1: "85.2",
-            score2: "102.4",
-            status: "LIVE",
-            isLive: true,
-          ),
-          SizedBox(height: 16.h),
-          _buildLeagueMatchCard(
-            team1: "NEON KNIGHTS",
-            team2: "DYNASTY WARRIORS",
-            score1: "76.5",
-            score2: "74.8",
-            status: "FINAL",
-          ),
-          SizedBox(height: 16.h),
-          _buildLeagueMatchCard(
-            team1: "SHADOW RAIDERS",
-            team2: "BLITZ BOMBERS",
-            score1: "0.0",
-            score2: "0.0",
-            status: "SUN 1:00 PM",
-          ),
-        ],
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('leagues')
+            .doc(widget.leagueId)
+            .collection('matches')
+            .orderBy('week', descending: true)
+            .orderBy('timestamp', descending: true)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator(color: AppColors.accentCyan));
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.sports_football_outlined, color: Colors.white10, size: 64.w),
+                  SizedBox(height: 16.h),
+                  Text("NO GAMES PLAYED", style: TextStyle(color: Colors.white38, fontSize: 16.sp, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            );
+          }
+
+          final matches = snapshot.data!.docs;
+          
+          // Trigger name fetch for all teams in matches
+          final allUids = <String>{};
+          for (var doc in matches) {
+            final m = doc.data() as Map<String, dynamic>;
+            allUids.add(m['team1'].toString());
+            allUids.add(m['team2'].toString());
+          }
+          
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _fetchManagerNames(allUids.toList());
+          });
+
+          return ListView.separated(
+            padding: EdgeInsets.all(20.w),
+            itemCount: matches.length,
+            separatorBuilder: (_, __) => SizedBox(height: 16.h),
+            itemBuilder: (context, index) {
+              final match = matches[index].data() as Map<String, dynamic>;
+              final t1 = match['team1'].toString();
+              final t2 = match['team2'].toString();
+              
+              return _buildLeagueMatchCard(
+                team1: _managerNames[t1] ?? "MANAGER ${t1.substring(0, 4)}",
+                team2: _managerNames[t2] ?? "MANAGER ${t2.substring(0, 4)}",
+                score1: (match['score1'] as num? ?? 0.0).toStringAsFixed(1),
+                score2: (match['score2'] as num? ?? 0.0).toStringAsFixed(1),
+                status: "WEEK ${match['week']}",
+                isLive: false, // We don't have true live games yet
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -83,20 +139,24 @@ class LeagueGamesScreen extends StatelessWidget {
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
                 decoration: BoxDecoration(
-                  color: isLive ? Colors.red.withOpacity(0.1) : Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(10.h),
+                  color: isLive ? AppColors.accentCyan.withOpacity(0.1) : Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(8.h),
                 ),
                 child: Text(
                   status,
                   style: TextStyle(
-                    color: isLive ? Colors.redAccent : Colors.white38,
+                    color: isLive ? AppColors.accentCyan : Colors.white38,
                     fontSize: 10.sp,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
               if (isLive)
-                Icon(Icons.sensors, color: Colors.redAccent, size: 16.w),
+                Container(
+                  width: 8.w,
+                  height: 8.w,
+                  decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                ),
             ],
           ),
           SizedBox(height: 20.h),
@@ -104,32 +164,25 @@ class LeagueGamesScreen extends StatelessWidget {
             children: [
               Expanded(
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    CircleAvatar(radius: 24.w, backgroundColor: Colors.white10, child: Icon(Icons.shield, color: AppColors.accentCyan, size: 24.w)),
-                    SizedBox(height: 12.h),
-                    Text(team1, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 12.sp, fontWeight: FontWeight.bold)),
+                    Text(team1, style: TextStyle(color: Colors.white, fontSize: 15.sp, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    SizedBox(height: 4.h),
+                    Text(score1, style: TextStyle(color: AppColors.accentCyan, fontSize: 24.sp, fontWeight: FontWeight.w900)),
                   ],
                 ),
               ),
-              Column(
-                children: [
-                  Row(
-                    children: [
-                      Text(score1, style: TextStyle(color: Colors.white, fontSize: 20.sp, fontWeight: FontWeight.w900)),
-                      SizedBox(width: 12.w),
-                      Text("VS", style: TextStyle(color: Colors.white24, fontSize: 14.sp, fontWeight: FontWeight.w900)),
-                      SizedBox(width: 12.w),
-                      Text(score2, style: TextStyle(color: Colors.white, fontSize: 20.sp, fontWeight: FontWeight.w900)),
-                    ],
-                  ),
-                ],
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20.w),
+                child: Text("VS", style: TextStyle(color: Colors.white10, fontSize: 18.sp, fontWeight: FontWeight.w900, fontStyle: FontStyle.italic)),
               ),
               Expanded(
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    CircleAvatar(radius: 24.w, backgroundColor: Colors.white10, child: Icon(Icons.shield, color: Colors.orangeAccent, size: 24.w)),
-                    SizedBox(height: 12.h),
-                    Text(team2, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 12.sp, fontWeight: FontWeight.bold)),
+                    Text(team2, style: TextStyle(color: Colors.white, fontSize: 15.sp, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    SizedBox(height: 4.h),
+                    Text(score2, style: TextStyle(color: AppColors.accentCyan, fontSize: 24.sp, fontWeight: FontWeight.w900)),
                   ],
                 ),
               ),

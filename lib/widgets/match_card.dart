@@ -144,10 +144,13 @@ class _MatchCardState extends State<MatchCard>
         CircleAvatar(
           radius: 28.w,
           backgroundColor: AppColors.surface,
-          child: FittedBox(
-            child: Padding(
-              padding: EdgeInsets.all(8.w),
-              child: Text(logo, style: TextStyle(fontSize: 24.sp)),
+          child: Padding(
+            padding: EdgeInsets.all(8.w),
+            child: Image.network(
+              "https://sleepercdn.com/images/team_logos/nfl/${logo.toLowerCase()}.png",
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) => 
+                  Center(child: Text(logo, style: TextStyle(color: Colors.white24, fontSize: 16.sp, fontWeight: FontWeight.bold))),
             ),
           ),
         ),

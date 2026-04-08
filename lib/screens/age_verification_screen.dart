@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
+import '../services/user_service.dart';
+import '../widgets/app_dialogs.dart';
 import 'matches_screen.dart';
 
 class AgeVerificationScreen extends StatefulWidget {
@@ -32,18 +34,19 @@ class _AgeVerificationScreenState extends State<AgeVerificationScreen> {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
+      // NEW: Run auto-generation of initial team and Bronze league
+      await UserService.initializeNewUser(user.uid);
+
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const MatchesScreen()),
+          MaterialPageRoute(builder: (_) => MatchesScreen()),
           (route) => false,
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error saving age: $e")),
-        );
+        AppDialogs.showPremiumErrorDialog(context, message: "Error saving age. Please try again.");
       }
     } finally {
       if (mounted) {

@@ -1,5 +1,12 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../services/user_service.dart';
+import '../../services/league_service.dart';
+import '../tabs/roster_tab.dart';
+
 import '../../core/colors.dart';
 import '../../core/constants.dart';
 import '../../core/responsive_helper.dart';
@@ -8,7 +15,16 @@ import '../player_profile_screen.dart';
 import '../scout_players_screen.dart';
 import '../daily_check_in_screen.dart';
 import '../game_recap_screen.dart';
+import '../draft_room_screen.dart';
+import '../league_chat_screen.dart';
+import '../offseason_dashboard_screen.dart';
 import '../../services/coin_service.dart';
+import '../../services/check_in_service.dart';
+import '../../widgets/app_dialogs.dart';
+import '../../widgets/notification_badge.dart';
+import '../league_games_screen.dart';
+import '../training_screen.dart';
+import '../matches_screen.dart';
 
 class HomeTab extends StatefulWidget {
   const HomeTab({super.key});
@@ -21,23 +37,265 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
   String _teamName = "GRIDIRON KINGS";
   late AnimationController _statsController;
   late AnimationController _logoController;
+  int _coins = 0;
+  List<Map<String, dynamic>> _myLeagues = [];
+  Map<String, dynamic>? _selectedLeague;
+  String? _userId;
+  String? _ageRange;
+  bool _isAnyTrainingCompleted = false;
+  bool _isSimulating = false;
+  bool _forceOffseason = false;
+  bool _isGuest = false;
+  Timer? _uiTimer;
+  final ScrollController _scrollController = ScrollController();
+
+
+  Timer? _countdownTimer;
 
   @override
   void initState() {
     super.initState();
-    _statsController = AnimationController(
-        vsync: this, duration: const Duration(seconds: 10), value: 0.2)
-      ..repeat();
-    _logoController = AnimationController(
-        vsync: this, duration: const Duration(seconds: 15), value: 0.5)
-      ..repeat();
+    _statsController = AnimationController(vsync: this, duration: const Duration(seconds: 10), value: 0.2)..repeat();
+    _logoController = AnimationController(vsync: this, duration: const Duration(seconds: 15), value: 0.5)..repeat();
+    _loadInitialData();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {});
+        
+        // Simulation Trigger Check (8 PM EST)
+        final now = DateTime.now().toUtc();
+        final estNow = now.subtract(const Duration(hours: 5));
+        if (estNow.hour == 20 && estNow.minute == 0 && estNow.second == 0 && !_isSimulating) {
+           _triggerLiveSimulation();
+        }
+      }
+    });
+  }
+  
+  Future<void> _loadInitialData() async {
+    try {
+      final profile = await UserService.getCurrentUserProfile();
+      final leagues = await LeagueService.getUserLeagues();
+      if (mounted) {
+        setState(() {
+          _teamName = (profile?['username']?.toString() ?? profile?['teamName']?.toString() ?? "MY TEAM").toUpperCase();
+          _userId = profile?['uid'];
+          _ageRange = profile?['ageRange'];
+          _isGuest = profile?['isGuest'] ?? false;
+          if (leagues.isNotEmpty) {
+            _myLeagues = leagues;
+            _selectedLeague = leagues.first;
+          }
+        });
+      }
+      if (_selectedLeague != null) {
+        // No need to manually load roster, StreamBuilder handles it
+      }
+    } catch (e) {
+      // Error handling
+    }
+  }
+
+  int _getDaysUntilDraft() {
+    final now = DateTime.now();
+    DateTime next;
+    if (now.day <= 15) {
+      next = DateTime(now.year, now.month, 15);
+    } else {
+      int nextMonth = now.month + 1;
+      int nextYear = now.year;
+      if (nextMonth > 12) {
+        nextMonth = 1;
+        nextYear++;
+      }
+      next = DateTime(nextYear, nextMonth, 15);
+    }
+    return next.difference(now).inDays;
+  }
+
+  double _calculateTeamSps(List<Map<String, dynamic>> roster) {
+    if (roster.isEmpty) return 0.0;
+    
+    // Only count starters for the overall team SPS
+    final starters = roster.where((p) {
+      final pos = p['pos']?.toString() ?? "";
+      return ["QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE", "FLEX", "SFLEX", "RB", "WR"].contains(pos);
+    }).toList();
+
+    if (starters.isEmpty) return 0.0;
+    
+    double total = 0.0;
+    for (var p in starters) {
+      total += double.tryParse(p['sps']?.toString() ?? "0.0") ?? 0.0;
+    }
+    return total / starters.length;
+  }
+
+  Widget _buildAgeBasedTipCard() {
+    final bool isPro = _ageRange == '18-plus';
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: 20.w),
+      padding: EdgeInsets.all(20.w),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20.h),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: EdgeInsets.all(12.w),
+            decoration: BoxDecoration(
+              color: (isPro ? AppColors.accentCyan : AppColors.selectionGreenStart).withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isPro ? Icons.trending_up : Icons.security,
+              color: isPro ? AppColors.accentCyan : AppColors.selectionGreenStart,
+              size: 24.sp,
+            ),
+          ),
+          SizedBox(width: 16.w),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isPro ? "PRO MARKET INSIGHT" : "ACADEMY SAFETY TIP",
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 10.sp,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                SizedBox(height: 4.h),
+                Text(
+                  isPro 
+                    ? "Monitor SPS trends carefully. High-growth players often peak before the mid-season trade window."
+                    : "Always verify your trades twice. Remember, virtual sportsmanship makes the best managers!",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13.sp,
+                    fontWeight: FontWeight.w500,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSimulationOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.85),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+             SizedBox(
+               width: 120.w,
+               height: 120.w,
+               child: CircularProgressIndicator(
+                 color: AppColors.accentCyan,
+                 strokeWidth: 2,
+               ),
+             ),
+             SizedBox(height: 40.h),
+             Text(
+               "SIMULATING MATCHES...",
+               style: TextStyle(
+                 color: Colors.white,
+                 fontSize: 20.sp,
+                 fontWeight: FontWeight.w900,
+                 letterSpacing: 3.0,
+               ),
+             ),
+             SizedBox(height: 12.h),
+             Text(
+               "PLEASE WAIT WHILE WE CALCULATE RESULTS",
+               style: TextStyle(
+                 color: Colors.white38,
+                 fontSize: 10.sp,
+                 fontWeight: FontWeight.bold,
+                 letterSpacing: 1.0,
+               ),
+             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Map<String, String> _getStandingsInfo() {
+    if (_selectedLeague == null || _selectedLeague!['standings'] == null) {
+      return {'record': '0-0', 'rank': '---', 'gamesOut': '0'};
+    }
+    final String? uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return {'record': '0-0', 'rank': '---', 'gamesOut': '0'};
+    }
+    final rawStandings = _selectedLeague!['standings'];
+    if (rawStandings is! Map) {
+      return {'record': '0-0', 'rank': '---', 'gamesOut': '0'};
+    }
+    final entries = rawStandings.entries.toList();
+    entries.sort((a, b) {
+      final wA = (a.value as Map?)?['w']?.toInt() ?? 0;
+      final wB = (b.value as Map?)?['w']?.toInt() ?? 0;
+      if (wA != wB) return wB.compareTo(wA);
+      
+      final pfA = (a.value as Map?)?['pf']?.toDouble() ?? 0.0;
+      final pfB = (b.value as Map?)?['pf']?.toDouble() ?? 0.0;
+      return pfB.compareTo(pfA);
+    });
+
+    final myUid = _userId ?? FirebaseAuth.instance.currentUser?.uid;
+    final myRank = entries.indexWhere((e) => e.key == myUid) + 1;
+    if (myRank == 0) return {'record': '0-0', 'rank': '---', 'gamesOut': '0'};
+
+    final myData = entries[myRank - 1].value as Map;
+    final int myWins = myData['w']?.toInt() ?? 0;
+    final int myLosses = myData['l']?.toInt() ?? 0;
+    final int myTies = myData['t']?.toInt() ?? 0;
+    final String record = myTies > 0 ? '${myWins}-${myLosses}-${myTies}' : '${myWins}-${myLosses}';
+    String rankStr = '${myRank}th';
+    if (myRank == 1) rankStr = '1st';
+    else if (myRank == 2) rankStr = '2nd';
+    else if (myRank == 3) rankStr = '3rd';
+    int gamesOut = 0;
+    if (myRank > 4 && entries.length >= 4) {
+      final fourthSeedData = entries[3].value as Map;
+      final int fourthWins = fourthSeedData['w']?.toInt() ?? 0;
+      gamesOut = fourthWins - myWins;
+    }
+    return {'record': record, 'rank': rankStr, 'gamesOut': gamesOut.toString()};
   }
 
   @override
   void dispose() {
+    _countdownTimer?.cancel();
     _statsController.dispose();
     _logoController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  String _getGametimeText() {
+    final now = DateTime.now().toUtc();
+    final estNow = now.subtract(const Duration(hours: 5));
+    var target = DateTime(estNow.year, estNow.month, estNow.day, 20, 0, 0); // 8 PM EST
+    if (estNow.isAfter(target)) {
+        target = target.add(const Duration(days: 1));
+    }
+    final diff = target.difference(estNow);
+    final hours = diff.inHours.toString().padLeft(2, '0');
+    final mins = (diff.inMinutes % 60).toString().padLeft(2, '0');
+    final secs = (diff.inSeconds % 60).toString().padLeft(2, '0');
+    return '$hours:$mins:$secs';
   }
 
   void _showEditTeamDialog() {
@@ -82,64 +340,109 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
     );
   }
 
+  Future<void> _triggerLiveSimulation() async {
+    if (_selectedLeague == null) return;
+    
+    setState(() => _isSimulating = true);
+    
+    try {
+      await LeagueService.simulateLeagueWeek(_selectedLeague!['id']);
+      if (mounted) {
+        AppDialogs.showSuccessDialog(
+          context,
+          title: "SIMULATION COMPLETE",
+          message: "The week's matches have finished. New standings are ready!",
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        AppDialogs.showPremiumErrorDialog(context, message: "League simulation encountered an error. Please try manually in Settings.");
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSimulating = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          // Background Stadium Image
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 350.h,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Image.asset(
-                    'assets/images/signup_background.png', // Switched to a more dynamic background
-                    fit: BoxFit.cover,
-                    alignment: Alignment.topCenter,
-                  ),
-                ),
-                Positioned.fill(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withOpacity(0.6),
-                          AppColors.background.withOpacity(0.9),
-                          AppColors.background,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          StreamBuilder<List<Map<String, dynamic>>>(
+            stream: (_selectedLeague != null && _userId != null)
+                ? LeagueService.getRosterStream(_selectedLeague!['id'], _userId!)
+                : Stream.empty(),
+            builder: (context, snapshot) {
+              final players = snapshot.data ?? [];
+              final teamSps = _calculateTeamSps(players);
 
-          // Content
-          SafeArea(
-            child: SingleChildScrollView(
-              child: Column(
+              return ListView(
+                controller: _scrollController,
+                padding: EdgeInsets.zero,
                 children: [
-                   _buildTopBar(),
-                   SizedBox(height: 10.h),
-                   _buildTeamHeader(),
-                   SizedBox(height: 20.h),
-                   _buildOverallStatsCircle(),
-                   SizedBox(height: 25.h),
-                   _buildActionButtons(context),
-                   SizedBox(height: 20.h),
-                   _buildRosterSection(context),
+                  Stack(
+                    children: [
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: 350.h,
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: Image.asset(
+                                'assets/images/signup_background.png',
+                                fit: BoxFit.cover,
+                                alignment: Alignment.topCenter,
+                              ),
+                            ),
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.black.withOpacity(0.6),
+                                      AppColors.background.withOpacity(0.9),
+                                      AppColors.background,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SafeArea(
+                        child: Column(
+                          children: [
+                             _buildTopBar(),
+                             SizedBox(height: 10.h),
+                             _buildTeamHeader(),
+                             SizedBox(height: 20.h),
+                             _buildOverallStatsCircle(teamSps),
+                             SizedBox(height: 25.h),
+                             _buildActionButtons(context),
+                             if (_ageRange != null) ...[
+                               SizedBox(height: 25.h),
+                               _buildAgeBasedTipCard(),
+                             ],
+                             SizedBox(height: 20.h),
+                             _buildRosterSection(context, players),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
-              ),
-            ),
+              );
+            }
           ),
+          if (_isSimulating) _buildSimulationOverlay(),
         ],
       ),
     );
@@ -155,43 +458,66 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
         border: Border.all(color: Colors.white10),
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: _buildTopBarItem("GAMEDAY:", "02:14:55", AppColors.accentCyan),
-            ),
+          _buildTopBarItem("GAMETIME:", Text(_getGametimeText(), style: const TextStyle(color: AppColors.accentCyan, fontWeight: FontWeight.bold))),
+          StreamBuilder<DocumentSnapshot>(
+            stream: _selectedLeague == null 
+              ? const Stream.empty() 
+              : FirebaseFirestore.instance.collection('leagues').doc(_selectedLeague!['id']).collection('draft').doc('info').snapshots(),
+            builder: (context, snapshot) {
+              final data = snapshot.hasData && snapshot.data!.exists 
+                  ? (snapshot.data!.data() is Map ? Map<String, dynamic>.from(snapshot.data!.data() as Map) : null)
+                  : null;
+              final status = _forceOffseason ? 'pending' : (data?['status'] as String? ?? 'active');
+
+              if (status == 'active' || status == 'waiting') {
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (_selectedLeague != null) {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => DraftRoomScreen(leagueId: _selectedLeague!['id'])));
+                    }
+                  },
+                  child: _buildTopBarItem("DRAFT DAY:", const Text("ENTER DRAFT", style: TextStyle(color: AppColors.gold, fontWeight: FontWeight.bold))),
+                );
+              } else if (status == 'pending') {
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onDoubleTap: () => setState(() => _forceOffseason = false),
+                  onTap: () {
+                    if (_selectedLeague != null) {
+                      Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => OffseasonDashboardScreen(
+                          leagueId: _selectedLeague!['id'],
+                          leagueName: _selectedLeague!['name'] ?? 'League',
+                          seasonNumber: _selectedLeague!['seasonNumber'] ?? 1,
+                        ),
+                      ));
+                    }
+                  },
+                  child: _buildTopBarItem("OFFSEASON:", const Text("OPEN HUB", style: TextStyle(color: AppColors.accentCyan, fontWeight: FontWeight.bold))),
+                );
+              }
+              return _buildTopBarItem("DRAFT DAY:", Text("${_getDaysUntilDraft()}d", style: const TextStyle(color: AppColors.orangeGradientStart, fontWeight: FontWeight.bold)));
+            },
           ),
-          Container(height: 20.h, width: 1, color: Colors.white24, margin: EdgeInsets.symmetric(horizontal: 8.w)),
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: _buildTopBarItem("DRAFT DAY:", "06d 14h 30m", AppColors.orangeGradientStart),
-            ),
-          ),
-          Container(height: 20.h, width: 1, color: Colors.white24, margin: EdgeInsets.symmetric(horizontal: 8.w)),
           StreamBuilder<int>(
             stream: CoinService.balanceStream(),
-            builder: (context, snap) {
-              final coins = snap.data ?? 0;
-              return Container(
-                padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
-                decoration: BoxDecoration(
-                  color: AppColors.gold.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(20.h),
-                  border: Border.all(color: AppColors.gold.withOpacity(0.3)),
-                ),
-                child: Row(
+            builder: (context, snapshot) {
+              final balance = snapshot.data ?? 0;
+              return GestureDetector(
+                onLongPress: () {
+                  setState(() => _forceOffseason = !_forceOffseason);
+                },
+                child: _buildTopBarItem("COINS:", Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.monetization_on, color: AppColors.gold, size: 14.w),
+                    Icon(Icons.monetization_on, color: AppColors.gold, size: 12.sp),
                     SizedBox(width: 4.w),
-                    Text(
-                      '$coins',
-                      style: TextStyle(color: AppColors.gold, fontSize: 11.sp, fontWeight: FontWeight.w900),
-                    ),
+                    Text("$balance", style: const TextStyle(color: AppColors.gold, fontWeight: FontWeight.bold)),
                   ],
-                ),
+                )),
               );
             },
           ),
@@ -199,193 +525,176 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
       ),
     );
   }
-
-  Widget _buildTopBarItem(String label, String value, Color valueColor) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+  
+  Widget _buildTopBarItem(String label, Widget valueWidget) {
+    return Column(
       children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white54,
-            fontSize: 10.sp,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        SizedBox(width: 6.w),
-        Text(
-          value,
-          style: TextStyle(
-            color: valueColor,
-            fontSize: 11.sp,
-            fontWeight: FontWeight.w900,
-            fontFamily: 'Courier',
+        Text(label, style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold)),
+        SizedBox(height: 4.h),
+        valueWidget,
+      ],
+    );
+  }
+
+  Widget _buildTeamHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_ageRange != null)
+           Padding(
+             padding: EdgeInsets.only(left: 16.w, bottom: 4.h),
+             child: Text(
+               _ageRange == '18-plus' ? "PRO DYNASTY EDITION" : "YOUTH ACADEMY EDITION",
+               style: TextStyle(
+                 color: _ageRange == '18-plus' ? AppColors.accentCyan : AppColors.selectionGreenStart,
+                 fontSize: 10.sp,
+                 fontWeight: FontWeight.w900,
+                 letterSpacing: 2.0,
+               ),
+             ),
+           ),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16.w),
+          child: Row(
+            children: [
+               Container(
+                 width: 50.w,
+                 height: 50.w,
+                 decoration: const BoxDecoration(
+                   shape: BoxShape.circle,
+                   color: AppColors.surface,
+                   boxShadow: [
+                     BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 4)),
+                   ],
+                 ),
+                 child: AnimatedBuilder(
+                   animation: _logoController,
+                   builder: (context, child) {
+                     return CustomPaint(
+                       painter: ActionBorderPainter(
+                         animationValue: _logoController.value,
+                         gradientColors: [
+                           AppColors.gold.withOpacity(0.0),
+                           AppColors.gold,
+                           AppColors.gold.withOpacity(0.0),
+                         ],
+                         hasGlow: true,
+                       ),
+                       child: child,
+                     );
+                   },
+                   child: Icon(Icons.catching_pokemon, color: AppColors.gold, size: 30.w),
+                 ),
+               ),
+               SizedBox(width: 12.w),
+               Expanded(
+                 child: Column(
+                   crossAxisAlignment: CrossAxisAlignment.start,
+                   children: [
+                     Row(
+                       children: [
+                         Flexible(
+                           child: Text(
+                             _teamName,
+                             maxLines: 1,
+                             overflow: TextOverflow.ellipsis,
+                             style: TextStyle(
+                               color: Colors.white,
+                               fontSize: 18.sp,
+                               fontWeight: FontWeight.w900,
+                               letterSpacing: 1.2,
+                             ),
+                           ),
+                         ),
+                       ],
+                     ),
+                     SizedBox(height: 2.h),
+                     Builder(
+                       builder: (context) {
+                         final info = _getStandingsInfo();
+                         return FittedBox(
+                           fit: BoxFit.scaleDown,
+                           alignment: Alignment.centerLeft,
+                           child: Row(
+                             children: [
+                               Text("RECORD: ", style: TextStyle(color: Colors.white38, fontSize: 11.sp)),
+                               Text(info['record']!, style: TextStyle(color: Colors.white70, fontSize: 11.sp, fontWeight: FontWeight.bold)),
+                               Text("  |  RANK: ", style: TextStyle(color: Colors.white38, fontSize: 11.sp)),
+                               Text(info['rank']!, style: TextStyle(color: Colors.white70, fontSize: 11.sp, fontWeight: FontWeight.bold)),
+                               Text("  |  GAMES OUT: ", style: TextStyle(color: Colors.white38, fontSize: 11.sp)),
+                               Text(info['gamesOut']!, style: TextStyle(color: Colors.white70, fontSize: 11.sp, fontWeight: FontWeight.bold)),
+                             ],
+                           ),
+                         );
+                       }
+                     ),
+                   ],
+                 ),
+               ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildTeamHeader() {
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16.w),
-      child: Row(
-        children: [
-           // Lion Logo (Placeholder Icon)
-           Container(
-             width: 50.w,
-             height: 50.w,
-             decoration: const BoxDecoration(
-               shape: BoxShape.circle,
-               color: AppColors.surface,
-               boxShadow: [
-                 BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 4)),
-               ],
-             ),
-             child: AnimatedBuilder(
-               animation: _logoController,
-               builder: (context, child) {
-                 return CustomPaint(
-                   painter: ActionBorderPainter(
-                     animationValue: _logoController.value,
-                     gradientColors: [
-                       AppColors.gold.withOpacity(0.0),
-                       AppColors.gold,
-                       AppColors.gold.withOpacity(0.0),
-                     ],
-                     hasGlow: true,
-                   ),
-                   child: child,
-                 );
-               },
-               child: Icon(Icons.catching_pokemon, color: AppColors.gold, size: 30.w), // Lion substitute
-             ),
-           ),
-           SizedBox(width: 12.w),
-           Expanded(
-             child: Column(
-               crossAxisAlignment: CrossAxisAlignment.start,
-               children: [
-                 Row(
-                   children: [
-                     Flexible(
-                       child: Text(
-                         _teamName,
-                         maxLines: 1,
-                         overflow: TextOverflow.ellipsis,
-                         style: TextStyle(
-                           color: Colors.white,
-                           fontSize: 18.sp,
-                           fontWeight: FontWeight.w900,
-                           letterSpacing: 1.2,
-                         ),
-                       ),
-                     ),
-                     SizedBox(width: 8.w),
-                      GestureDetector(
-                        onTap: _showEditTeamDialog,
-                        behavior: HitTestBehavior.opaque,
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
-                          child: Icon(Icons.edit_outlined, color: AppColors.accentCyan, size: 20.w),
-                        ),
-                      ),
-                   ],
-                 ),
-                 SizedBox(height: 2.h),
-                 FittedBox(
-                   fit: BoxFit.scaleDown,
-                   alignment: Alignment.centerLeft,
-                   child: Row(
-                     children: [
-                       Text(
-                         "RECORD: ",
-                         style: TextStyle(color: Colors.white38, fontSize: 11.sp),
-                       ),
-                       Text(
-                         "3-7",
-                         style: TextStyle(color: Colors.white70, fontSize: 11.sp, fontWeight: FontWeight.bold),
-                       ),
-                       Text(
-                         "  |  LEAGUE RANK: ",
-                         style: TextStyle(color: Colors.white38, fontSize: 11.sp),
-                       ),
-                       Text(
-                         "9th (4 GB)",
-                         style: TextStyle(color: Colors.white70, fontSize: 11.sp, fontWeight: FontWeight.bold),
-                       ),
-                     ],
-                   ),
-                 ),
-               ],
-             ),
-           ),
-        ],
-      ),
-    );
-  }
+  Widget _buildOverallStatsCircle(double teamSps) {
+    return AnimatedBuilder(
+      animation: _statsController,
+      builder: (context, child) {
+        // Slow pulse for a premium feel
+        final scale = 1.0 + (math.sin(_statsController.value * 2 * math.pi) * 0.02);
+        final glowOpacity = 0.2 + (math.sin(_statsController.value * 2 * math.pi) * 0.1);
 
-  Widget _buildOverallStatsCircle() {
-    return Container(
-      width: 140.w,
-      height: 140.w,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: AppColors.footballBrown, width: 8.w),
-        gradient: const RadialGradient(
-          colors: [
-             AppColors.statsCircleBgStart,
-             AppColors.statsCircleBgEnd,
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.gold.withOpacity(0.3),
-            blurRadius: 20,
-            spreadRadius: 5,
-          ),
-        ],
-      ),
-      child: AnimatedBuilder(
-        animation: _statsController,
-        builder: (context, child) {
-          return CustomPaint(
-            painter: ActionBorderPainter(
-              animationValue: _statsController.value,
-              gradientColors: [
-                AppColors.footballBrown.withOpacity(0.0),
-                AppColors.footballBrown,
-                AppColors.footballBrown.withOpacity(0.0),
+        return Transform.scale(
+          scale: scale,
+          child: Container(
+            width: 140.w,
+            height: 140.w,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.footballBrown, width: 8.w),
+              gradient: const RadialGradient(
+                colors: [
+                  AppColors.statsCircleBgStart,
+                  AppColors.statsCircleBgEnd,
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.gold.withOpacity(glowOpacity.clamp(0.0, 1.0)),
+                  blurRadius: 20,
+                  spreadRadius: 5,
+                ),
               ],
-              hasGlow: true,
             ),
             child: child,
-          );
-        },
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              "OVERALL\nTEAM SPS:",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 9.sp,
-                fontWeight: FontWeight.bold,
-                height: 1.1,
-              ),
+          ),
+        );
+      },
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            "OVERALL\nTEAM SPS:",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 9.sp,
+              fontWeight: FontWeight.bold,
+              height: 1.1,
             ),
-            SizedBox(height: 4.h),
-            Text(
-              "68.5",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 28.sp,
-                fontWeight: FontWeight.w900,
-              ),
+          ),
+          SizedBox(height: 4.h),
+          Text(
+            teamSps.toStringAsFixed(1),
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 28.sp,
+              fontWeight: FontWeight.w900,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -396,13 +705,33 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
       padding: EdgeInsets.symmetric(horizontal: 20.w),
       child: Row(
         children: [
+          StreamBuilder<bool>(
+            stream: CheckInService.checkInStatusStream(),
+            builder: (context, snapshot) {
+              return HomeActionCard(
+                title: "DAILY",
+                subtitle: "CHECK-IN",
+                icon: Icons.calendar_today,
+                colors: [AppColors.accentCyan, AppColors.createGradientPurple],
+                duration: const Duration(seconds: 11),
+                showNotification: snapshot.data == true,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DailyCheckInScreen())),
+              );
+            }
+          ),
           HomeActionCard(
             title: "TRAIN",
             subtitle: "PLAYERS",
             icon: Icons.fitness_center,
             colors: [AppColors.blueGradientStart, AppColors.blueGradientEnd],
             duration: const Duration(seconds: 3),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
+            onTap: () {
+              _scrollController.animateTo(
+                _scrollController.position.maxScrollExtent - 200,
+                duration: const Duration(milliseconds: 1000),
+                curve: Curves.easeInOutQuart,
+              );
+            },
           ),
           HomeActionCard(
             title: "SCOUT",
@@ -410,7 +739,29 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
             icon: Icons.search,
             colors: [AppColors.greenGradientStart, AppColors.greenGradientEnd],
             duration: const Duration(seconds: 5),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ScoutPlayersScreen())),
+            onTap: () {
+              if (_selectedLeague != null && _userId != null) {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => ScoutPlayersScreen(
+                  leagueId: _selectedLeague!['id'],
+                  userId: _userId!,
+                )));
+              }
+            },
+          ),
+          HomeActionCard(
+            title: "LEAGUE",
+            subtitle: "CHAT",
+            icon: Icons.chat_bubble_outline_rounded,
+            colors: [AppColors.accentCyan, AppColors.blueGradientStart],
+            duration: const Duration(seconds: 4),
+            onTap: () {
+              if (_selectedLeague != null) {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => LeagueChatScreen(
+                  leagueId: _selectedLeague!['id'],
+                  leagueName: _selectedLeague!['name'] ?? 'League',
+                )));
+              }
+            },
           ),
           HomeActionCard(
             title: "VIEW",
@@ -418,7 +769,13 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
             icon: Icons.vignette,
             colors: [AppColors.orangeGradientStart, AppColors.orangeGradientEnd],
             duration: const Duration(seconds: 7),
-            onTap: () {},
+            onTap: () {
+              if (_selectedLeague != null) {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => LeagueGamesScreen(leagueId: _selectedLeague!['id'] as String),
+                ));
+              }
+            },
           ),
           HomeActionCard(
             title: "VIEW",
@@ -426,15 +783,13 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
             icon: Icons.groups,
             colors: [AppColors.purpleGradientStart, AppColors.purpleGradientEnd],
             duration: const Duration(seconds: 9),
-            onTap: () {},
-          ),
-          HomeActionCard(
-            title: "DAILY",
-            subtitle: "CHECK-IN",
-            icon: Icons.calendar_today,
-            colors: [AppColors.accentCyan, AppColors.createGradientPurple],
-            duration: const Duration(seconds: 11),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DailyCheckInScreen())),
+            onTap: () {
+              _scrollController.animateTo(
+                _scrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 800),
+                curve: Curves.easeInOutQuart,
+              );
+            },
           ),
           HomeActionCard(
             title: "GAME",
@@ -449,8 +804,12 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildRosterSection(BuildContext context, List<Map<String, dynamic>> players) {
+    // Show discovery if no league joined yet, OR if in automated Bronze league but NOT a guest.
+    final bool hasNoLeague = _selectedLeague == null && _myLeagues.isEmpty;
+    final bool isBronzeLeague = _selectedLeague?['tier'] == 'Bronze';
+    final bool showDiscovery = hasNoLeague || (isBronzeLeague && !_isGuest);
 
-  Widget _buildRosterSection(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.rosterSectionBg,
@@ -462,24 +821,168 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
       child: Column(
         children: [
           _buildRosterHeader(),
-          _buildPlayerRow(pos: "QB", name: "J. Fields", sps: "78", matchup: "@LAR", exp: "4Y", img: Icons.person, context: context),
-          _buildPlayerRow(pos: "RB", name: "S. Barkley", sps: "88", matchup: "vs DAL", exp: "6Y", img: Icons.person, context: context),
-          _buildPlayerRow(pos: "RB", name: "K. Walker", sps: "72", matchup: "@SEA", exp: "2Y", img: Icons.person, context: context),
-          _buildPlayerRow(pos: "WR", name: "J. Chase", sps: "91", matchup: "@CIN", exp: "3Y", img: Icons.person, context: context),
-          _buildPlayerRow(pos: "WR", name: "D. Smith", sps: "85", matchup: "vs PHI", exp: "3Y", img: Icons.person, context: context),
-          _buildPlayerRow(pos: "WR", name: "A. St. Brown", sps: "89", matchup: "@DET", exp: "3Y", img: Icons.person, context: context),
-          _buildPlayerRow(pos: "TE", name: "T. Hockenson", sps: "84", matchup: "vs MIN", exp: "5Y", img: Icons.person, context: context),
-          _buildPlayerRow(pos: "FLEX", name: "T. Pollard", sps: "82", matchup: "@TEN", exp: "5Y", img: Icons.person, context: context),
-          _buildPlayerRow(pos: "SFX", name: "K. Cousins", sps: "80", matchup: "vs ATL", exp: "12Y", img: Icons.person, context: context),
-          _buildSectionHeader("BENCH (18)"),
-          _buildPlayerRow(pos: "BN", name: "C. Watson", sps: "76", matchup: "vs GB", exp: "2Y", img: Icons.person, context: context),
-          _buildSectionHeader("IR (4)"),
-          _buildPlayerRow(pos: "IR", name: "N. Chubb", sps: "88", matchup: "INJURED", exp: "6Y", img: Icons.person, context: context),
-          _buildSectionHeader("TAXI (2)"),
-          _buildPlayerRow(pos: "TX", name: "M. Harrison Jr.", sps: "75", matchup: "ROOKIE", exp: "R", img: Icons.person, context: context),
+          if (showDiscovery)
+            _buildDiscoveryPrompt(context)
+          else ...[
+            _buildPlayerFromSlot(context, "QB", _getPlayerBySlot(players, "QB"), players),
+            _buildPlayerFromSlot(context, "RB", _getPlayerBySlot(players, "RB1"), players),
+            _buildPlayerFromSlot(context, "RB", _getPlayerBySlot(players, "RB2"), players),
+            _buildPlayerFromSlot(context, "WR", _getPlayerBySlot(players, "WR1"), players),
+            _buildPlayerFromSlot(context, "WR", _getPlayerBySlot(players, "WR2"), players),
+            _buildPlayerFromSlot(context, "WR", _getPlayerBySlot(players, "WR3"), players),
+            _buildPlayerFromSlot(context, "TE", _getPlayerBySlot(players, "TE"), players),
+            _buildPlayerFromSlot(context, "W/R/T", _getPlayerBySlot(players, "FLEX"), players),
+            _buildPlayerFromSlot(context, "W/R/T/Q", _getPlayerBySlot(players, "SFLEX"), players),
+            
+            _buildSectionHeader("BENCH (${players.where((p) => p['pos'] == 'BN').length})"),
+            ...players.where((p) => p['pos'] == 'BN').map((p) => _buildPlayerFromSlot(context, "BN", p, players)),
+            
+            _buildSectionHeader("IR (${players.where((p) => p['pos'] == 'IR').length})"),
+            ...players.where((p) => p['pos'] == 'IR').map((p) => _buildPlayerFromSlot(context, "IR", p, players)),
+            
+            _buildSectionHeader("TAXI (${players.where((p) => p['pos'] == 'TAXI').length})"),
+            ...players.where((p) => p['pos'] == 'TAXI').map((p) => _buildPlayerFromSlot(context, "TAXI", p, players)),
+          ],
           SizedBox(height: 50.h),
         ],
       ),
+    );
+  }
+
+  Widget _buildDiscoveryPrompt(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(32.w),
+      child: Column(
+        children: [
+          Icon(Icons.sports_football, color: AppColors.accentCyan.withOpacity(0.5), size: 64.w),
+          SizedBox(height: 24.h),
+          Text(
+            "READY TO PLAY NFL?",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22.sp,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.5,
+            ),
+          ),
+          SizedBox(height: 12.h),
+          Text(
+            "Take command of your own NFL franchise. Join or create a league to start building your dynasty today.",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white38,
+              fontSize: 14.sp,
+              height: 1.5,
+            ),
+          ),
+          SizedBox(height: 32.h),
+          GestureDetector(
+            onTap: () {
+              // Switch to LEAGUE tab (Index 1)
+              final matchesState = MatchesScreen.of(context);
+              if (matchesState != null) {
+                matchesState.setTab(1);
+              }
+            },
+            child: Container(
+              width: double.infinity,
+              padding: EdgeInsets.symmetric(vertical: 16.h),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AppColors.accentCyan, AppColors.createGradientPurple],
+                ),
+                borderRadius: BorderRadius.circular(16.h),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.accentCyan.withOpacity(0.3),
+                    spreadRadius: 1,
+                    blurRadius: 15,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Text(
+                  "CONTINUE TO LEAGUES",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14.sp,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Map<String, dynamic>? _getPlayerBySlot(List<Map<String, dynamic>> players, String slot) {
+    // 1. Try exact match (for new data or single slots like QB/TE)
+    final exact = players.where((p) => p['pos'] == slot).firstOrNull;
+    if (exact != null) return exact;
+
+    // 2. Fallback for legacy generic data ('RB' -> 'RB1'/'RB2')
+    if (slot == 'RB1' || slot == 'RB2' || slot == 'RB') {
+      final rbs = players.where((p) => p['pos'] == 'RB' || p['pos'] == 'RB1' || p['pos'] == 'RB2').toList();
+      if (slot == 'RB1' && rbs.isNotEmpty) return rbs[0];
+      if (slot == 'RB2' && rbs.length > 1) return rbs[1];
+      if (slot == 'RB' && rbs.isNotEmpty) return rbs[0];
+    }
+    
+    if (slot.startsWith('WR')) {
+      final wrs = players.where((p) => p['pos'] == 'WR' || p['pos'].toString().startsWith('WR')).toList();
+      if (slot == 'WR1' && wrs.isNotEmpty) return wrs[0];
+      if (slot == 'WR2' && wrs.length > 1) return wrs[1];
+      if (slot == 'WR3' && wrs.length > 2) return wrs[2];
+    }
+
+    if (slot == 'SFLEX' || slot == 'S-FLEX') {
+      return players.where((p) => p['pos'] == 'SFLEX' || p['pos'] == 'S-FLEX').firstOrNull;
+    }
+
+    return null;
+  }
+
+  Widget _buildPlayerFromSlot(BuildContext context, String pos, Map<String, dynamic>? player, List<Map<String, dynamic>> allPlayers) {
+    if (player == null) {
+        return _buildPlayerRow(
+          pos: pos, 
+          name: "EMPTY", 
+          sps: "-", 
+          matchup: "-", 
+          exp: "-", 
+          img: Icons.person_outline, 
+          context: context,
+          isPlaceholder: true,
+          onTrain: null,
+        );
+    }
+    
+    return _buildPlayerRow(
+      pos: pos,
+      name: player['name'] ?? 'Unknown',
+      sps: player['sps']?.toString() ?? '??',
+      matchup: player['matchup'] ?? '-',
+      exp: player['exp']?.toString() ?? '?',
+      img: Icons.person,
+      context: context,
+      onTrain: () {
+        if (_selectedLeague != null && _userId != null) {
+          final index = allPlayers.indexOf(player);
+          Navigator.push(context, MaterialPageRoute(
+            builder: (_) => TrainingScreen(
+              player: player,
+              leagueId: _selectedLeague!['id'],
+              userId: _userId!,
+              playerIndex: index,
+            ),
+          ));
+        }
+      },
     );
   }
 
@@ -491,11 +994,11 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
       ),
       child: Row(
         children: [
-          SizedBox(width: 30.w, child: Text("Pos", style: _headerStyle)),
+          SizedBox(width: 45.w, child: Text("Pos", style: _headerStyle)),
           Expanded(child: Text("Player", style: _headerStyle)),
-          SizedBox(width: 40.w, child: Text("PROJ.", style: _headerStyle)),
-          SizedBox(width: 60.w, child: Text("Matchup", style: _headerStyle)),
-          SizedBox(width: 30.w, child: Text("Exp.", style: _headerStyle)),
+          SizedBox(width: 45.w, child: Text("PROJ.", style: _headerStyle)),
+          SizedBox(width: 55.w, child: Text("Matchup", style: _headerStyle)),
+          SizedBox(width: 35.w, child: Text("Exp.", style: _headerStyle)),
           SizedBox(width: 60.w, child: Center(child: Text("Train", style: _headerStyle))),
         ],
       ),
@@ -527,6 +1030,8 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
     required String exp,
     required IconData img,
     required BuildContext context,
+    required VoidCallback? onTrain,
+    bool isPlaceholder = false,
   }) {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 8.h),
@@ -536,7 +1041,7 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
       child: Row(
         children: [
           SizedBox(
-            width: 30.w,
+            width: 45.w,
             child: Text(
               pos,
               maxLines: 1,
@@ -554,29 +1059,14 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
                 ),
                 SizedBox(width: 8.w),
                 Expanded(
-                  child: GestureDetector(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PlayerProfileScreen(
-                          name: name,
-                          pos: pos,
-                          sps: sps,
-                          exp: exp,
-                        ),
-                      ),
-                    ),
-                    child: Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11.sp,
-                        fontWeight: FontWeight.bold,
-                        decoration: TextDecoration.underline,
-                        decorationColor: Colors.white24,
-                      ),
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.sp,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
@@ -584,7 +1074,7 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
             ),
           ),
           SizedBox(
-            width: 40.w,
+            width: 45.w,
             child: Text(
               sps,
               maxLines: 1,
@@ -593,7 +1083,7 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
             ),
           ),
           SizedBox(
-            width: 60.w,
+            width: 55.w,
             child: Text(
               matchup,
               maxLines: 1,
@@ -602,7 +1092,7 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
             ),
           ),
           SizedBox(
-            width: 30.w,
+            width: 35.w,
             child: Text(
               exp,
               maxLines: 1,
@@ -613,18 +1103,19 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
           SizedBox(
             width: 60.w,
             child: GestureDetector(
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
+              onTap: onTrain,
               child: Container(
                 height: 28.h,
                 decoration: BoxDecoration(
-                  color: AppColors.cardBorder,
+                  gradient: isPlaceholder ? null : const LinearGradient(
+                    colors: [AppColors.blueGradientStart, AppColors.blueGradientEnd],
+                  ),
                   borderRadius: BorderRadius.circular(8.h),
-                  border: Border.all(color: Colors.white12),
                 ),
                 child: Center(
                   child: Text(
-                    "Train",
-                    style: TextStyle(color: Colors.white70, fontSize: 10.sp, fontWeight: FontWeight.bold),
+                    isPlaceholder ? "" : "Train",
+                    style: TextStyle(color: Colors.white, fontSize: 10.sp, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -642,7 +1133,6 @@ class _HomeTabState extends State<HomeTab> with TickerProviderStateMixin {
   );
 }
 
-// Premium Animated Action Card for Home Screen
 class HomeActionCard extends StatefulWidget {
   final String title;
   final String subtitle;
@@ -650,6 +1140,7 @@ class HomeActionCard extends StatefulWidget {
   final List<Color> colors;
   final Duration duration;
   final VoidCallback onTap;
+  final bool showNotification;
 
   const HomeActionCard({
     super.key,
@@ -659,6 +1150,7 @@ class HomeActionCard extends StatefulWidget {
     required this.colors,
     required this.duration,
     required this.onTap,
+    this.showNotification = false,
   });
 
   @override
@@ -758,6 +1250,12 @@ class _HomeActionCardState extends State<HomeActionCard> with SingleTickerProvid
                               ],
                             ),
                           ),
+                          if (widget.showNotification)
+                            Positioned(
+                              top: 8.h,
+                              right: 8.w,
+                              child: const PulsingNotificationDot(),
+                            ),
                         ],
                       ),
                     ),

@@ -102,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const MatchesScreen()),
+          MaterialPageRoute(builder: (_) => MatchesScreen()),
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -162,7 +162,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (registrationCompleted) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => const MatchesScreen()),
+            MaterialPageRoute(builder: (_) => MatchesScreen()),
           );
         } else {
           Navigator.pushReplacement(

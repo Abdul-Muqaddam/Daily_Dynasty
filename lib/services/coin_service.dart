@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 class CoinService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -28,21 +29,31 @@ class CoinService {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    final batch = _db.batch();
     final userRef = _db.collection('users').doc(user.uid);
-    final txRef = userRef.collection('coinTransactions').doc();
 
-    batch.update(userRef, {
+    // 1. Update the coin balance on the user document.
+    // Use set with merge: true to ensure the document exists and fields are updated/created.
+    debugPrint('CoinService: Awarding $amount coins for $reason...');
+    await userRef.set({
       'coins': FieldValue.increment(amount),
-    });
-    batch.set(txRef, {
-      'amount': amount,
-      'reason': reason,
-      'timestamp': FieldValue.serverTimestamp(),
-      'type': 'credit',
-    });
+    }, SetOptions(merge: true));
+    debugPrint('CoinService: Coins awarded successfully.');
 
-    await batch.commit();
+    // 2. Attempt to write to the subcollection (transaction log).
+    // We wrap this in a separate try-catch because Firestore rules might block subcollections
+    // but allowing the main document update. This ensures the user still gets their coins.
+    try {
+      final txRef = userRef.collection('coinTransactions').doc();
+      await txRef.set({
+        'amount': amount,
+        'reason': reason,
+        'timestamp': FieldValue.serverTimestamp(),
+        'type': 'credit',
+      });
+    } catch (e) {
+      // ignore suppressed error for logging - at least coins were awarded
+      debugPrint('CoinService: Failed to write transaction log: $e');
+    }
   }
 
   /// Spends [amount] coins. Throws if the user has insufficient balance.
@@ -59,14 +70,20 @@ class CoinService {
         throw Exception('Insufficient coins');
       }
 
-      final txRef = userRef.collection('coinTransactions').doc();
       tx.update(userRef, {'coins': FieldValue.increment(-amount)});
-      tx.set(txRef, {
-        'amount': -amount,
-        'reason': reason,
-        'timestamp': FieldValue.serverTimestamp(),
-        'type': 'debit',
-      });
+
+      // Attempt to log transaction
+      try {
+        final txRef = userRef.collection('coinTransactions').doc();
+        tx.set(txRef, {
+          'amount': -amount,
+          'reason': reason,
+          'timestamp': FieldValue.serverTimestamp(),
+          'type': 'debit',
+        });
+      } catch (e) {
+        debugPrint('CoinService: Failed to log debit: $e');
+      }
     });
   }
 }

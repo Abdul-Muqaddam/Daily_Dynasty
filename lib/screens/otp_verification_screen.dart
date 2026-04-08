@@ -4,6 +4,7 @@ import '../core/colors.dart';
 import '../core/constants.dart';
 import '../core/responsive_helper.dart';
 import '../services/otp_service.dart';
+import '../widgets/app_dialogs.dart';
 import 'create_username_screen.dart';
 import 'create_new_password_screen.dart';
 
@@ -62,14 +63,16 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       await OtpService.generateAndSaveOtp(widget.email);
       _startTimer();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Verification code resent!')),
+        AppDialogs.showSuccessDialog(context,
+          title: 'Code Resent!',
+          message: 'A new verification code has been sent to ${widget.email}.',
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error resending: $e')),
+        AppDialogs.showPremiumErrorDialog(context,
+          message: 'Error resending code. Check your connection.',
+          isNetworkError: true,
         );
       }
     } finally {
@@ -82,8 +85,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   Future<void> _handleVerify() async {
     final enteredCode = _controllers.map((c) => c.text).join();
     if (enteredCode.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter the complete 6-digit code')),
+      AppDialogs.showInfoDialog(context,
+        title: 'Incomplete Code',
+        message: 'Please enter all 6 digits of your verification code.',
+        icon: Icons.dialpad_rounded,
       );
       return;
     }
@@ -109,15 +114,15 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Invalid or expired code. Please try again.')),
+          AppDialogs.showPremiumErrorDialog(context,
+            message: 'Invalid or expired code. Please check your email and try again.',
           );
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Verification error: $e')),
+        AppDialogs.showPremiumErrorDialog(context,
+          message: 'Verification failed. Please try again.',
         );
       }
     } finally {

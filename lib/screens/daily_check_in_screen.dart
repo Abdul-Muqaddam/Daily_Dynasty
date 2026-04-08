@@ -4,6 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
 import '../services/coin_service.dart';
+import '../widgets/countdown_timer.dart';
+import '../widgets/app_dialogs.dart';
+import 'matches_screen.dart';
 
 class DailyCheckInScreen extends StatefulWidget {
   const DailyCheckInScreen({super.key});
@@ -122,16 +125,27 @@ class _DailyCheckInScreenState extends State<DailyCheckInScreen>
     }).toList();
     filtered.add(Timestamp.fromDate(now));
 
-    await ref.update({
+    await ref.set({
       'streak': streak,
       'lastCheckIn': Timestamp.fromDate(now),
       'weekCheckIns': filtered,
-    });
+    }, SetOptions(merge: true));
 
     // Award coins for the check-in
     await CoinService.awardCoins(50, 'daily_checkin');
 
-    await _loadCheckInData();
+    if (mounted) {
+      final matchesState = MatchesScreen.globalKey.currentState;
+      AppDialogs.showSuccessDialog(
+        context,
+        title: "COINS CLAIMED!",
+        message: "50 coins added to your wallet.",
+        onDismiss: () {
+          Navigator.pop(context);
+          matchesState?.setTab(0);
+        },
+      );
+    }
   }
 
   @override
@@ -428,16 +442,26 @@ class _DailyCheckInScreenState extends State<DailyCheckInScreen>
               if (!_claimedToday) ...[
                 Icon(Icons.redeem, color: Colors.black, size: 20.w),
                 SizedBox(width: 10.w),
-              ],
-              Text(
-                _claimedToday ? "COME BACK TOMORROW" : "CLAIM TODAY'S REWARD",
-                style: TextStyle(
-                  color: _claimedToday ? Colors.white38 : Colors.black,
-                  fontSize: 15.sp,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.5,
+                Text(
+                  "CLAIM TODAY'S REWARD",
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 15.sp,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
                 ),
-              ),
+              ] else ...[
+                CheckInCountdown(
+                  prefix: "NEXT REWARD IN ",
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 15.sp,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

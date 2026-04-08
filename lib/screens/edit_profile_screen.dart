@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
+import '../widgets/app_dialogs.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -50,9 +51,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _saveProfile() async {
     final username = _usernameController.text.trim();
     if (username.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Username cannot be empty')),
-      );
+      AppDialogs.showPremiumErrorDialog(context, message: 'Username cannot be empty');
       return;
     }
 
@@ -77,9 +76,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving profile: $e')),
-        );
+        AppDialogs.showPremiumErrorDialog(context, message: 'Error saving profile. Please check your connection.');
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);

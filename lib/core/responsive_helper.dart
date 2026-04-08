@@ -42,4 +42,5 @@ extension ResponsiveDouble on num {
   double get sp => ResponsiveHelper.setSp(toDouble());
   double get h => ResponsiveHelper.setHeight(toDouble());
   double get w => ResponsiveHelper.setWidth(toDouble());
+  double get r => ResponsiveHelper.setWidth(toDouble());
 }

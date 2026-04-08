@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
+import '../services/trade_service.dart';
+import '../widgets/app_dialogs.dart';
+import '../widgets/propose_trade_bottom_sheet.dart';
 
 class TradeBlockScreen extends StatefulWidget {
-  const TradeBlockScreen({super.key});
+  final bool isEmbedded;
+  const TradeBlockScreen({super.key, this.isEmbedded = false});
 
   @override
   State<TradeBlockScreen> createState() => _TradeBlockScreenState();
@@ -12,19 +16,6 @@ class TradeBlockScreen extends StatefulWidget {
 class _TradeBlockScreenState extends State<TradeBlockScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-
-  // Mock data
-  final List<Map<String, dynamic>> _incomingTrades = [
-    {
-      'from': 'CYBER TITANS',
-      'offering': ['Patrick Mahomes (QB)', 'Breece Hall (RB)'],
-      'requesting': ['Justin Jefferson (WR)', 'Travis Kelce (TE)'],
-      'status': 'pending',
-      'timeAgo': '2h ago',
-    },
-  ];
-
-  final List<Map<String, dynamic>> _outgoingTrades = [];
 
   @override
   void initState() {
@@ -38,12 +29,23 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
     super.dispose();
   }
 
+  void _showProposeTradeSheet() async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const ProposeTradeBottomSheet(),
+    );
+    
+    // StreamBuilders will automatically refresh, but we could add manual refresh if needed.
+  }
+
   @override
   Widget build(BuildContext context) {
     ResponsiveHelper.init(context);
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
+      appBar: widget.isEmbedded ? null : AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
         leading: IconButton(
@@ -69,8 +71,24 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildTradeList(_incomingTrades, isIncoming: true),
-                _buildTradeList(_outgoingTrades, isIncoming: false),
+                StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: TradeService.getIncomingTradesStream(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator(color: AppColors.accentCyan));
+                    }
+                    return _buildTradeList(snapshot.data ?? [], isIncoming: true);
+                  }
+                ),
+                StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: TradeService.getOutgoingTradesStream(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator(color: AppColors.accentCyan));
+                    }
+                    return _buildTradeList(snapshot.data ?? [], isIncoming: false);
+                  }
+                ),
               ],
             ),
           ),
@@ -100,27 +118,7 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
         unselectedLabelColor: Colors.white70,
         labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.sp),
         tabs: [
-          Tab(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text("INCOMING"),
-                if (_incomingTrades.isNotEmpty)
-                  Container(
-                    margin: EdgeInsets.only(left: 6.w),
-                    padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
-                    decoration: BoxDecoration(
-                      color: Colors.redAccent,
-                      borderRadius: BorderRadius.circular(10.h),
-                    ),
-                    child: Text(
-                      '${_incomingTrades.length}',
-                      style: TextStyle(color: Colors.white, fontSize: 9.sp, fontWeight: FontWeight.w900),
-                    ),
-                  ),
-              ],
-            ),
-          ),
+          const Tab(text: "INCOMING"),
           const Tab(text: "OUTGOING"),
         ],
       ),
@@ -160,9 +158,11 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
   }
 
   Widget _buildTradeCard(Map<String, dynamic> trade, {required bool isIncoming}) {
-    final List<String> offering = List<String>.from(trade['offering'] as List);
-    final List<String> requesting = List<String>.from(trade['requesting'] as List);
-    final status = trade['status'] as String;
+    final List<Map<String, dynamic>> offering = List<Map<String, dynamic>>.from(trade['offeringFull'] ?? []);
+    final List<Map<String, dynamic>> requesting = List<Map<String, dynamic>>.from(trade['requestingFull'] ?? []);
+    final List<Map<String, dynamic>> offeringPicks = List<Map<String, dynamic>>.from(trade['offeringPicks'] ?? []);
+    final List<Map<String, dynamic>> requestingPicks = List<Map<String, dynamic>>.from(trade['requestingPicks'] ?? []);
+    final status = trade['status'] as String? ?? 'pending';
     final isPending = status == 'pending';
 
     final statusColor = isPending
@@ -194,15 +194,13 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
                   ),
                   SizedBox(width: 8.w),
                   Text(
-                    isIncoming ? 'From: ${trade['from']}' : 'To: ${trade['from']}',
+                    isIncoming ? 'From: ${trade['fromTeamName']}' : 'To: ${trade['toTeamName']}',
                     style: TextStyle(color: Colors.white70, fontSize: 12.sp, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
               Row(
                 children: [
-                  Text(trade['timeAgo'] as String, style: TextStyle(color: Colors.white24, fontSize: 10.sp)),
-                  SizedBox(width: 8.w),
                   Container(
                     padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 3.h),
                     decoration: BoxDecoration(
@@ -222,12 +220,12 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
           SizedBox(height: 16.h),
           Row(
             children: [
-              Expanded(child: _buildTradeColumn("THEY OFFER", offering, AppColors.accentCyan)),
+              Expanded(child: _buildTradeColumn(isIncoming ? "THEY OFFER" : "YOU OFFER", offering, offeringPicks, AppColors.accentCyan)),
               Padding(
                 padding: EdgeInsets.symmetric(horizontal: 8.w),
                 child: Icon(Icons.swap_horiz, color: Colors.white24, size: 20.w),
               ),
-              Expanded(child: _buildTradeColumn("THEY WANT", requesting, AppColors.orangeGradientStart)),
+              Expanded(child: _buildTradeColumn(isIncoming ? "THEY WANT" : "YOU WANT", requesting, requestingPicks, AppColors.orangeGradientStart)),
             ],
           ),
           if (isIncoming && isPending) ...[
@@ -236,7 +234,15 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
               children: [
                 Expanded(
                   child: GestureDetector(
-                    onTap: () => setState(() => _incomingTrades.first['status'] = 'rejected'),
+                    onTap: () async {
+                      try {
+                        await TradeService.updateTradeStatus(trade['id'], 'rejected');
+                      } catch (e) {
+                        if (mounted) {
+                          AppDialogs.showPremiumErrorDialog(context, message: 'Failed to decline trade. Please try again.');
+                        }
+                      }
+                    },
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: 10.h),
                       decoration: BoxDecoration(
@@ -253,7 +259,22 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
                 SizedBox(width: 10.w),
                 Expanded(
                   child: GestureDetector(
-                    onTap: () => setState(() => _incomingTrades.first['status'] = 'accepted'),
+                    onTap: () async {
+                      try {
+                        await TradeService.acceptTrade(trade['id']);
+                        if (mounted) {
+                          AppDialogs.showSuccessDialog(
+                            context,
+                            title: 'Trade Accepted!',
+                            message: 'The trade has been completed. Check your roster for the new players.',
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          AppDialogs.showPremiumErrorDialog(context, message: 'Failed to accept trade. Please try again.');
+                        }
+                      }
+                    },
                     child: Container(
                       padding: EdgeInsets.symmetric(vertical: 10.h),
                       decoration: BoxDecoration(
@@ -276,43 +297,84 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
     );
   }
 
-  Widget _buildTradeColumn(String label, List<String> players, Color color) {
+  Widget _buildTradeColumn(String label, List<Map<String, dynamic>> players, List<Map<String, dynamic>> picks, Color color) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
-        SizedBox(height: 6.h),
+        SizedBox(height: 10.h),
         ...players.map((p) => Padding(
-              padding: EdgeInsets.only(bottom: 4.h),
+              padding: EdgeInsets.only(bottom: 8.h),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 10.w,
-                    backgroundColor: color.withOpacity(0.1),
-                    child: Icon(Icons.person, color: color, size: 12.w),
-                  ),
-                  SizedBox(width: 6.w),
+                  Container(
+                    width: 24.w,
+                    height: 24.w,
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: color.withOpacity(0.2)),
+                    ),
+                    child: ClipOval(
+                      child: p['player_id'] != null
+                          ? Image.network(
+                              "https://sleepercdn.com/content/nfl/players/thumb/${p['player_id']}.jpg",
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => 
+                                  Icon(Icons.person, color: color, size: 14.w),
+                            )
+                          : Icon(Icons.person, color: color, size: 14.w),
+                    ),
+                    ),
+                  SizedBox(width: 8.w),
                   Expanded(
-                    child: Text(
-                      p,
-                      style: TextStyle(color: Colors.white70, fontSize: 10.sp),
-                      overflow: TextOverflow.ellipsis,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          p['name']?.toString() ?? "UNKNOWN",
+                          style: TextStyle(color: Colors.white, fontSize: 10.sp, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          "${p['pos']} - ${p['team']}",
+                          style: TextStyle(color: Colors.white38, fontSize: 8.sp),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             )),
+        if (picks.isNotEmpty) ...[
+          if (players.isNotEmpty) SizedBox(height: 4.h),
+          ...picks.map((pick) => Padding(
+            padding: EdgeInsets.only(bottom: 6.h),
+            child: Row(
+              children: [
+                Container(
+                  width: 24.w, height: 24.w,
+                  decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle, border: Border.all(color: color.withOpacity(0.2))),
+                  child: Center(child: Text(pick['round'].toString(), style: TextStyle(color: color, fontSize: 10.sp, fontWeight: FontWeight.bold))),
+                ),
+                SizedBox(width: 8.w),
+                Expanded(
+                  child: Text(
+                    "${pick['year']} Rd ${pick['round']}",
+                    style: TextStyle(color: Colors.white70, fontSize: 10.sp, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          )),
+        ],
       ],
     );
   }
 
   Widget _buildProposeButton() {
     return GestureDetector(
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Trade proposal builder coming soon!')),
-        );
-      },
+      onTap: _showProposeTradeSheet,
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 14.h),
         decoration: BoxDecoration(

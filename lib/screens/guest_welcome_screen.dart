@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../core/constants.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
+import '../services/auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../widgets/app_dialogs.dart';
 import 'matches_screen.dart';
 
 class GuestWelcomeScreen extends StatelessWidget {
@@ -75,56 +78,72 @@ class GuestWelcomeScreen extends StatelessWidget {
                   Spacer(),
 
                   // Start As Guest Button
-                  Container(
-                    width: double.infinity,
-                    height: 60.h,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [
-                          AppColors.guestBlue,
-                          AppColors.guestGreen,
+                  GestureDetector(
+                    onTap: () async {
+                      try {
+                        final user = await AuthService.signInAnonymously();
+                        if (user != null && context.mounted) {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(builder: (_) => MatchesScreen()),
+                          );
+                        }
+                      } on FirebaseAuthException catch (e) {
+                         if (context.mounted) {
+                           String message = "Guest login failed. Check your connection.";
+                           if (e.code == 'admin-restricted-operation') {
+                             message = "Anonymous sign-in is disabled in Firebase Console. Please enable it in Authentication > Sign-in method.";
+                           }
+                           AppDialogs.showPremiumErrorDialog(context, message: message);
+                         }
+                      } catch (e) {
+                        if (context.mounted) {
+                          AppDialogs.showPremiumErrorDialog(
+                            context,
+                            message: "Failed to start guest session. Please try again later.",
+                          );
+                        }
+                      }
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      height: 60.h,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [
+                            AppColors.guestBlue,
+                            AppColors.guestGreen,
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(30.h),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.accentCyan.withOpacity(0.3),
+                            blurRadius: 20,
+                            offset: const Offset(0, 5),
+                          ),
                         ],
                       ),
-                      borderRadius: BorderRadius.circular(30.h),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.accentCyan.withOpacity(0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 5),
-                        ),
-                      ],
-                    ),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () {
-                           Navigator.pushReplacement(
-                             context,
-                             MaterialPageRoute(builder: (_) => const MatchesScreen()),
-                           );
-                        },
-                        borderRadius: BorderRadius.circular(30.h),
-                        child: Center(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                'START AS GUEST',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18.sp,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 1.0,
-                                ),
-                              ),
-                              SizedBox(width: 10.w),
-                              Icon(
-                                Icons.sports_football,
+                      child: Center(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'START AS GUEST',
+                              style: TextStyle(
                                 color: Colors.white,
-                                size: 24.sp,
+                                fontSize: 18.sp,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.0,
                               ),
-                            ],
-                          ),
+                            ),
+                            SizedBox(width: 10.w),
+                            Icon(
+                              Icons.sports_football,
+                              color: Colors.white,
+                              size: 24.sp,
+                            ),
+                          ],
                         ),
                       ),
                     ),

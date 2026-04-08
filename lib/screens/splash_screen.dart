@@ -7,6 +7,7 @@ import '../core/responsive_helper.dart';
 import 'login_screen.dart';
 import 'matches_screen.dart';
 import 'create_username_screen.dart';
+import '../services/player_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -20,6 +21,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
+    PlayerService.seedInitialPlayers(); // Initialize global players
     _controller = AnimationController(vsync: this, duration: const Duration(seconds: 7));
     _progress = TweenSequence<double>([
       TweenSequenceItem(tween: Tween(begin: 0.0, end: 0.25).chain(CurveTween(curve: Curves.easeOut)), weight: 2),
@@ -61,7 +63,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           final registrationCompleted = userDoc.data()?['registrationCompleted'] ?? false;
 
           if (registrationCompleted) {
-            _navigateTo(const MatchesScreen());
+            _navigateTo(MatchesScreen());
           } else {
             _navigateTo(const CreateUsernameScreen());
           }
@@ -69,7 +71,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           // If fetching user document fails (e.g. offline), 
           // do NOT kick them out to login. Send to MatchesScreen so they stay authenticated.
           print('Error checking registration status in splash: $e');
-          _navigateTo(const MatchesScreen());
+          _navigateTo(MatchesScreen());
         }
       }
     });

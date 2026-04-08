@@ -8,6 +8,7 @@ import '../core/responsive_helper.dart';
 import 'otp_verification_screen.dart';
 import '../services/auth_service.dart';
 import 'create_username_screen.dart';
+import '../widgets/app_dialogs.dart';
 import 'matches_screen.dart';
 
 class SignUpScreen extends StatefulWidget {
@@ -110,7 +111,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         'email': _emailController.text.trim(),
         'registrationCompleted': false,
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
 
       // Generate and "Send" OTP (Saves to Firestore)
       await OtpService.generateAndSaveOtp(_emailController.text.trim());
@@ -133,16 +134,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
           } else if (e.code == 'invalid-email') {
             _emailError = 'The email address is not valid.';
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(e.message ?? 'An error occurred')),
+            AppDialogs.showPremiumErrorDialog(context,
+              message: e.message ?? 'An error occurred during sign up.',
             );
           }
         });
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+        AppDialogs.showPremiumErrorDialog(context,
+          message: 'Sign up failed. Please try again.',
         );
       }
     } finally {
@@ -164,7 +165,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
         if (registrationCompleted) {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => const MatchesScreen()),
+            MaterialPageRoute(builder: (_) => MatchesScreen())
+,
           );
         } else {
           Navigator.pushReplacement(
@@ -175,8 +177,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Google Sign-In failed: $e')),
+        AppDialogs.showPremiumErrorDialog(context,
+          message: 'Google Sign-In failed. Please try again.',
+          isNetworkError: true,
         );
       }
     } finally {

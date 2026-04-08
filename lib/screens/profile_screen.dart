@@ -11,6 +11,12 @@ import '../services/auth_service.dart';
 import 'login_screen.dart';
 import 'edit_profile_screen.dart';
 import 'daily_check_in_screen.dart';
+import 'activity_feed_screen.dart';
+import '../services/check_in_service.dart';
+import '../services/notification_service.dart';
+import '../widgets/notification_badge.dart';
+import '../widgets/app_dialogs.dart';
+import '../widgets/countdown_timer.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -49,8 +55,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error fetching profile: $e')),
+        AppDialogs.showPremiumErrorDialog(context,
+          message: 'Error fetching profile. Please check your connection.',
+          isNetworkError: true,
         );
       }
     }
@@ -70,8 +77,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: $e')),
+        AppDialogs.showPremiumErrorDialog(context,
+          message: 'Could not pick image. Please try again.',
         );
       }
     }
@@ -108,14 +115,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await _fetchUserData();
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile picture updated!')),
+        AppDialogs.showSuccessDialog(context,
+          title: 'Photo Updated!',
+          message: 'Your profile picture has been updated successfully.',
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error uploading image: $e')),
+        AppDialogs.showPremiumErrorDialog(context,
+          message: 'Error uploading image. Check your connection and try again.',
+          isNetworkError: true,
         );
       }
     } finally {
@@ -202,8 +211,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting account: $e. You may need to re-login first.')),
+        AppDialogs.showPremiumErrorDialog(context,
+          message: 'Error deleting account. You may need to re-login first.',
         );
       }
     }
@@ -314,7 +323,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         const Spacer(),
-        if (Navigator.canPop(context)) SizedBox(width: 40.w),
+        // Notification bell with live unread count badge
+        if (currentUser != null)
+          StreamBuilder<int>(
+            stream: NotificationService.unreadCountStream(currentUser!.uid),
+            builder: (context, snapshot) {
+              final count = snapshot.data ?? 0;
+              return GestureDetector(
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ActivityFeedScreen())),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.all(8.w),
+                      child: Icon(Icons.notifications_outlined, color: Colors.white70, size: 24.sp),
+                    ),
+                    if (count > 0)
+                      Positioned(
+                        top: 2.h,
+                        right: 2.w,
+                        child: Container(
+                          padding: EdgeInsets.all(3.w),
+                          decoration: const BoxDecoration(
+                            color: Colors.redAccent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            count > 9 ? '9+' : '$count',
+                            style: TextStyle(color: Colors.white, fontSize: 8.sp, fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          )
+        else
+          SizedBox(width: 40.w),
       ],
     );
   }
@@ -395,14 +441,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
         SizedBox(height: 20.h),
-        Text(
-          username.toUpperCase(),
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 24.sp,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 1.0,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              username.toUpperCase(),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24.sp,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.0,
+              ),
+            ),
+            if (userData?['ageRange'] != null) ...[
+              SizedBox(width: 10.w),
+              _buildAgeBadge(userData?['ageRange'] == '18-plus'),
+            ],
+          ],
         ),
         SizedBox(height: 4.h),
         if ((userData?['fullName'] as String? ?? '').isNotEmpty)
@@ -558,15 +613,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Icon(Icons.check, color: Colors.black, size: 24.w),
                 ),
                 SizedBox(height: 8.h),
-                Text(
-                  "Day 1 of 7",
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16.sp,
-                    fontWeight: FontWeight.bold,
-                  ),
+                StreamBuilder<bool>(
+                  stream: CheckInService.checkInStatusStream(),
+                  builder: (context, snap) {
+                    if (snap.data == false) {
+                      return CheckInCountdown(
+                        prefix: "Next in ",
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 16.sp,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      );
+                    }
+                    return Text(
+                      "Day 1 of 7",
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 16.sp,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  }
                 ),
               ],
+            ),
+            StreamBuilder<bool>(
+              stream: CheckInService.checkInStatusStream(),
+              builder: (context, snapshot) {
+                if (snapshot.data == true) {
+                  return Positioned(
+                    top: 10.h,
+                    right: 10.w,
+                    child: const PulsingNotificationDot(),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
             ),
           ],
         ),
@@ -639,6 +722,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAgeBadge(bool isAdult) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isAdult 
+            ? [AppColors.accentCyan, AppColors.createGradientPurple] 
+            : [AppColors.selectionGreenStart, AppColors.selectionGreenEnd],
+        ),
+        borderRadius: BorderRadius.circular(8.h),
+        boxShadow: [
+          BoxShadow(
+            color: (isAdult ? AppColors.accentCyan : AppColors.selectionGreenStart).withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Text(
+        isAdult ? "PRO" : "YOUTH",
+        style: TextStyle(
+          color: isAdult ? Colors.white : Colors.black,
+          fontSize: 10.sp,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
         ),
       ),
     );
