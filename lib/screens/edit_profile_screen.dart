@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
 import '../widgets/app_dialogs.dart';
+import '../widgets/profile_avatar.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -207,8 +208,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             child: CircleAvatar(
               radius: 60.w,
               backgroundColor: AppColors.surface,
-              backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
-              child: photoUrl == null
+              backgroundImage: resolveProfileImage(photoUrl),
+              child: resolveProfileImage(photoUrl) == null
                   ? Icon(Icons.person, size: 60.w, color: Colors.white24)
                   : null,
             ),

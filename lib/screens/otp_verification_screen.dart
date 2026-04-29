@@ -11,10 +11,13 @@ import 'create_new_password_screen.dart';
 class OtpVerificationScreen extends StatefulWidget {
   final String email;
   final bool isForgotPassword;
+  final Map<String, dynamic>? registrationData;
+  
   const OtpVerificationScreen({
     super.key,
     required this.email,
     this.isForgotPassword = false,
+    this.registrationData,
   });
 
   @override
@@ -108,7 +111,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           } else {
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (_) => const CreateUsernameScreen()),
+              MaterialPageRoute(builder: (_) => CreateUsernameScreen(registrationData: widget.registrationData)),
             );
           }
         }
@@ -137,7 +140,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     if (!widget.isForgotPassword && mounted) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const CreateUsernameScreen()),
+        MaterialPageRoute(builder: (_) => CreateUsernameScreen(registrationData: widget.registrationData)),
       );
     }
   }

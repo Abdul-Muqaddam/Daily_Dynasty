@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/colors.dart';
 import '../../core/responsive_helper.dart';
+import '../../widgets/profile_avatar.dart';
 
 enum LeaderboardCategory {
   topPointsCurrentSeason,
@@ -281,10 +282,13 @@ class _LeaderboardTabState extends State<LeaderboardTab> with SingleTickerProvid
               color: AppColors.accentCyan.withOpacity(0.1),
               border: Border.all(color: isTop3 ? rankColor.withOpacity(0.4) : Colors.white10),
             ),
-            child: entry['photoUrl'] != null
-                ? ClipOval(child: Image.network(entry['photoUrl'], fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Icon(Icons.person, color: Colors.white38, size: 22.w)))
-                : Icon(Icons.person, color: Colors.white38, size: 22.w),
+            child: ClipOval(
+                child: buildProfileImage(
+                  photoUrl: entry['photoUrl'] as String?,
+                  size: 40.w,
+                  fallback: Icon(Icons.person, color: Colors.white38, size: 22.w),
+                ),
+              ),
           ),
           SizedBox(width: 12.w),
           // Name & Team

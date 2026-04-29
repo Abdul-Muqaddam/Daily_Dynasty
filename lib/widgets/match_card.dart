@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../core/colors.dart';
 import '../core/constants.dart';
 import '../core/responsive_helper.dart';
@@ -137,6 +138,7 @@ class _MatchCardState extends State<MatchCard>
     );
   }
 
+
   Widget _buildTeamInfo(String name, String logo) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -146,10 +148,11 @@ class _MatchCardState extends State<MatchCard>
           backgroundColor: AppColors.surface,
           child: Padding(
             padding: EdgeInsets.all(8.w),
-            child: Image.network(
-              "https://sleepercdn.com/images/team_logos/nfl/${logo.toLowerCase()}.png",
+            child: CachedNetworkImage(
+              imageUrl: "https://sleepercdn.com/images/team_logos/nfl/${logo.toLowerCase()}.png",
               fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => 
+              placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 2),
+              errorWidget: (context, url, error) => 
                   Center(child: Text(logo, style: TextStyle(color: Colors.white24, fontSize: 16.sp, fontWeight: FontWeight.bold))),
             ),
           ),

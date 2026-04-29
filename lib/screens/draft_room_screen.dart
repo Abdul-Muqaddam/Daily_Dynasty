@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../core/colors.dart';
@@ -272,10 +273,11 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
                       ),
                       child: ClipOval(
                         child: pick['player_id'] != null
-                            ? Image.network(
-                                "https://sleepercdn.com/content/nfl/players/thumb/${pick['player_id']}.jpg",
+                            ? CachedNetworkImage(
+                                imageUrl: "https://sleepercdn.com/content/nfl/players/thumb/${pick['player_id']}.jpg",
                                 fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) => 
+                                placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 1),
+                                errorWidget: (context, url, error) => 
                                     Center(child: Text(pick['position'] ?? '?', style: const TextStyle(color: Colors.white24))),
                               )
                             : Center(
@@ -478,13 +480,14 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
                       border: Border.all(color: Colors.white10),
                     ),
                     child: ClipOval(
-                      child: rc['player_id'] != null
-                          ? Image.network(
-                              "https://sleepercdn.com/content/nfl/players/thumb/${rc['player_id']}.jpg",
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => 
-                                  Center(child: Text(rc['position'] ?? '?', style: const TextStyle(color: Colors.white24))),
-                            )
+                        child: rc['player_id'] != null
+                            ? CachedNetworkImage(
+                                imageUrl: "https://sleepercdn.com/content/nfl/players/thumb/${rc['player_id']}.jpg",
+                                fit: BoxFit.cover,
+                                placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 1),
+                                errorWidget: (context, url, error) => 
+                                    Center(child: Text(rc['position'] ?? '?', style: const TextStyle(color: Colors.white24))),
+                              )
                           : Center(
                               child: Text(
                                 rc['position'] ?? '?',

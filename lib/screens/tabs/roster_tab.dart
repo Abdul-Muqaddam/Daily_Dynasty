@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/colors.dart';
 import '../../core/responsive_helper.dart';
 import '../../services/league_service.dart';
@@ -433,11 +434,13 @@ class _RosterTabState extends State<RosterTab> {
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
+
                     if (player['player_id'] != null)
-                      Image.network(
-                        "https://sleepercdn.com/content/nfl/players/thumb/${player['player_id']}.jpg",
+                      CachedNetworkImage(
+                        imageUrl: "https://sleepercdn.com/content/nfl/players/thumb/${player['player_id']}.jpg",
                         fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => const SizedBox(),
+                        placeholder: (context, url) => const SizedBox(),
+                        errorWidget: (context, url, error) => const SizedBox(),
                       ),
                     Container(
                       color: (player['player_id'] != null) ? Colors.black38 : Colors.transparent,

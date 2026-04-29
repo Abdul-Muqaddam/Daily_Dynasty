@@ -90,6 +90,30 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text.trim(),
       );
 
+      // Check if registration was completed
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        final registrationCompleted = userDoc.data()?['registrationCompleted'] ?? false;
+        
+        if (!registrationCompleted) {
+          // They are logging in but never completed registration.
+          try {
+            await FirebaseFirestore.instance.collection('users').doc(user.uid).delete();
+            await user.delete();
+          } catch (_) {}
+          await FirebaseAuth.instance.signOut();
+          
+          if (mounted) {
+            setState(() {
+              _emailError = 'Registration was incomplete. Please sign up again.';
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+      }
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('remember_me', _rememberMe);
       

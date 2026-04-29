@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/colors.dart';
 import '../../core/responsive_helper.dart';
@@ -14,6 +15,7 @@ import '../../services/mock_draft_service.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'player_profile_screen.dart';
+import '../../widgets/profile_avatar.dart';
 
 class LeagueDetailsScreen extends StatefulWidget {
   final Map<String, dynamic> league;
@@ -644,9 +646,9 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
           CircleAvatar(
             radius: 20.w,
             backgroundColor: AppColors.accentCyan.withOpacity(0.2),
-            backgroundImage: member['photoUrl'] != null ? NetworkImage(member['photoUrl']) : null,
-            child: member['photoUrl'] == null 
-                ? Icon(Icons.person, color: AppColors.accentCyan, size: 24.w) 
+            backgroundImage: resolveProfileImage(member['photoUrl'] as String?),
+            child: resolveProfileImage(member['photoUrl'] as String?) == null
+                ? Icon(Icons.person, color: AppColors.accentCyan, size: 24.w)
                 : null,
           ),
           SizedBox(width: 16.w),
@@ -934,9 +936,11 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                               border: Border.all(color: Colors.white10),
                             ),
                             clipBehavior: Clip.antiAlias,
-                            child: photoUrl != null 
-                              ? Image.network(photoUrl, fit: BoxFit.cover, errorBuilder: (context, error, stackTrace) => Icon(Icons.person, color: Colors.white38, size: 20.w))
-                              : Icon(Icons.smart_toy_outlined, color: Colors.white38, size: 20.w), // Default Bot avatar
+                            child: buildProfileImage(
+                              photoUrl: photoUrl,
+                              size: 44.w,
+                              fallback: Icon(Icons.smart_toy_outlined, color: Colors.white38, size: 20.w),
+                            ),
                           ),
                           if (crownColor != null)
                             Positioned(
@@ -1684,9 +1688,9 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
           CircleAvatar(
             radius: 18.w,
             backgroundColor: AppColors.createGradientPurple.withOpacity(0.1),
-            backgroundImage: player['photoUrl'] != null ? NetworkImage(player['photoUrl']) : null,
-            child: player['photoUrl'] == null 
-                ? Icon(Icons.person, color: Colors.white24, size: 20.w) 
+            backgroundImage: resolveProfileImage(player['photoUrl'] as String?),
+            child: resolveProfileImage(player['photoUrl'] as String?) == null
+                ? Icon(Icons.person, color: Colors.white24, size: 20.w)
                 : null,
           ),
           SizedBox(width: 12.w),
@@ -2262,10 +2266,11 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
             ),
             clipBehavior: Clip.antiAlias,
             child: imageUrl.isNotEmpty
-                ? Image.network(
-                    imageUrl,
+                ? CachedNetworkImage(
+                    imageUrl: imageUrl,
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => Icon(Icons.person, color: Colors.white38, size: 24.w),
+                    placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 1),
+                    errorWidget: (context, url, error) => Icon(Icons.person, color: Colors.white38, size: 24.w),
                   )
                 : Icon(Icons.person, color: Colors.white38, size: 24.w),
           ),

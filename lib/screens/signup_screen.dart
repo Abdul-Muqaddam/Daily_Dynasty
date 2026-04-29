@@ -97,21 +97,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      // Update display name
-      await userCredential.user?.updateDisplayName(_fullNameController.text.trim());
-
-      // Create user document in Firestore
-      await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-        'fullName': _fullNameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'registrationCompleted': false,
-        'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      // Check if email already exists using Firebase Auth
+      final methods = await FirebaseAuth.instance.fetchSignInMethodsForEmail(_emailController.text.trim());
+          
+      if (methods.isNotEmpty) {
+        setState(() {
+          _emailError = 'Account already exists for this email.';
+          _isLoading = false;
+        });
+        return;
+      }
 
       // Generate and "Send" OTP (Saves to Firestore)
       await OtpService.generateAndSaveOtp(_emailController.text.trim());
@@ -120,7 +115,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => OtpVerificationScreen(email: _emailController.text.trim()),
+            builder: (_) => OtpVerificationScreen(
+              email: _emailController.text.trim(),
+              registrationData: {
+                'fullName': _fullNameController.text.trim(),
+                'email': _emailController.text.trim(),
+                'password': _passwordController.text.trim(),
+              },
+            ),
           ),
         );
       }

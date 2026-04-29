@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
 import '../services/trade_service.dart';
@@ -315,12 +316,14 @@ class _TradeBlockScreenState extends State<TradeBlockScreen>
                       shape: BoxShape.circle,
                       border: Border.all(color: color.withOpacity(0.2)),
                     ),
+
                     child: ClipOval(
                       child: p['player_id'] != null
-                          ? Image.network(
-                              "https://sleepercdn.com/content/nfl/players/thumb/${p['player_id']}.jpg",
+                          ? CachedNetworkImage(
+                              imageUrl: "https://sleepercdn.com/content/nfl/players/thumb/${p['player_id']}.jpg",
                               fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => 
+                              placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 1),
+                              errorWidget: (context, url, error) => 
                                   Icon(Icons.person, color: color, size: 14.w),
                             )
                           : Icon(Icons.person, color: color, size: 14.w),

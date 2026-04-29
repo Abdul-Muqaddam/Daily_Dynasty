@@ -1,18 +1,20 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import '../core/colors.dart';
 import '../core/constants.dart';
 import '../core/responsive_helper.dart';
 import 'matches_screen.dart';
 import 'age_verification_screen.dart';
+import 'login_screen.dart';
 import '../widgets/app_dialogs.dart';
 
 class CreateUsernameScreen extends StatefulWidget {
-  const CreateUsernameScreen({super.key});
+  final Map<String, dynamic>? registrationData;
+  const CreateUsernameScreen({super.key, this.registrationData});
 
   @override
   State<CreateUsernameScreen> createState() => _CreateUsernameScreenState();
@@ -96,57 +98,61 @@ class _CreateUsernameScreenState extends State<CreateUsernameScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception("User not logged in");
-
-      // 1. Check if username is taken
-      final query = await FirebaseFirestore.instance
-          .collection('users')
-          .where('username', isEqualTo: username)
-          .get();
-
-      if (query.docs.isNotEmpty && query.docs.first.id != user.uid) {
-        setState(() {
-          _usernameError = 'Username already taken';
-          _isLoading = false;
-        });
-        return;
-      }
-
       String? photoUrl;
-      // 2. Upload image if exists
       if (_imageFile != null) {
-        final storage = FirebaseStorage.instanceFor(
-          bucket: 'daily-dynasty.firebasestorage.app',
-        );
-        
-        final ref = storage
-            .ref()
-            .child('profile_pictures')
-            .child('${user.uid}.jpg');
-        
-        await ref.putFile(_imageFile!);
-        photoUrl = await ref.getDownloadURL();
+        final bytes = await _imageFile!.readAsBytes();
+        final base64Str = base64Encode(bytes);
+        photoUrl = 'data:image/jpeg;base64,$base64Str';
       }
 
-      // 3. Save to Firestore (partial update)
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'username': username,
-        'photoUrl': photoUrl,
-        'themeColor': _colorOptions[_selectedColorIndex]['name'],
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      if (widget.registrationData != null) {
+        // Deferred Email/Password Registration Flow
+        widget.registrationData!['username'] = username;
+        widget.registrationData!['photoUrl'] = photoUrl;
+        widget.registrationData!['themeColor'] = _colorOptions[_selectedColorIndex]['name'];
+        
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => AgeVerificationScreen(registrationData: widget.registrationData)),
+          );
+        }
+      } else {
+        // Google Sign-In Flow (User already exists in Firebase Auth)
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) throw Exception("User not logged in");
 
-      // 4. Update Firebase Auth Profile
-      if (photoUrl != null) {
-        await user.updatePhotoURL(photoUrl);
-      }
+        // 1. Check if username is taken
+        final query = await FirebaseFirestore.instance
+            .collection('users')
+            .where('username', isEqualTo: username)
+            .get();
 
-      if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const AgeVerificationScreen()),
-        );
+        if (query.docs.isNotEmpty && query.docs.first.id != user.uid) {
+          setState(() {
+            _usernameError = 'Username already taken';
+            _isLoading = false;
+          });
+          return;
+        }
+
+        // 2. Save to Firestore (partial update)
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'username': username,
+          'photoUrl': photoUrl,
+          'themeColor': _colorOptions[_selectedColorIndex]['name'],
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        // 3. Update Firebase Auth display name
+        await user.updateDisplayName(username);
+
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AgeVerificationScreen()),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -317,25 +323,52 @@ class _CreateUsernameScreenState extends State<CreateUsernameScreen> {
           ),
 
           SafeArea(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.symmetric(horizontal: 24.w),
-              child: Column(
-                children: [
-                  SizedBox(height: 40.h),
-                  _buildHeader(),
-                  SizedBox(height: 40.h),
-                  _buildAvatarSection(selectedColor),
-                  SizedBox(height: 40.h),
-                  _buildInputSection(selectedColor),
-                  SizedBox(height: 40.h),
-                  _buildColorSelection(),
-                  SizedBox(height: 40.h),
-                  _buildPreviewSection(selectedColor),
-                  SizedBox(height: 40.h),
-                  _buildNextButton(selectedColor),
-                  SizedBox(height: 40.h),
-                ],
-              ),
+            child: Stack(
+              children: [
+                SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(horizontal: 24.w),
+                  child: Column(
+                    children: [
+                      SizedBox(height: 40.h),
+                      _buildHeader(),
+                      SizedBox(height: 40.h),
+                      _buildAvatarSection(selectedColor),
+                      SizedBox(height: 40.h),
+                      _buildInputSection(selectedColor),
+                      SizedBox(height: 40.h),
+                      _buildColorSelection(),
+                      SizedBox(height: 40.h),
+                      _buildPreviewSection(selectedColor),
+                      SizedBox(height: 40.h),
+                      _buildNextButton(selectedColor),
+                      SizedBox(height: 40.h),
+                    ],
+                  ),
+                ),
+                Positioned(
+                  top: 10.h,
+                  left: 10.w,
+                  child: IconButton(
+                    icon: Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 24.sp),
+                    onPressed: () async {
+                      try {
+                        final user = FirebaseAuth.instance.currentUser;
+                        if (user != null) {
+                          await FirebaseFirestore.instance.collection('users').doc(user.uid).delete();
+                          await user.delete();
+                        }
+                      } catch (_) {}
+                      await FirebaseAuth.instance.signOut();
+                      if (context.mounted) {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
         ],

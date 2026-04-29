@@ -1,7 +1,7 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/colors.dart';
@@ -17,6 +17,7 @@ import '../services/notification_service.dart';
 import '../widgets/notification_badge.dart';
 import '../widgets/app_dialogs.dart';
 import '../widgets/countdown_timer.dart';
+import '../widgets/profile_avatar.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -90,28 +91,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _isUploading = true);
     
     try {
-      // Use instanceFor to be explicit about the bucket name if the default one fails
-      final storage = FirebaseStorage.instanceFor(
-        bucket: 'daily-dynasty.firebasestorage.app',
-      );
-      
-      final ref = storage
-          .ref()
-          .child('profile_pictures')
-          .child('${currentUser!.uid}.jpg');
-      
-      await ref.putFile(imageFile);
-      final photoUrl = await ref.getDownloadURL();
-      
+      final bytes = await imageFile.readAsBytes();
+      final base64Str = base64Encode(bytes);
+      final photoUrl = 'data:image/jpeg;base64,$base64Str';
+
       // Update Firestore
       await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUser!.uid)
           .update({'photoUrl': photoUrl});
-          
-      // Update Firebase Auth Profile
-      await currentUser!.updatePhotoURL(photoUrl);
-      
+
       await _fetchUserData();
       
       if (mounted) {
@@ -227,6 +216,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       default: return AppColors.selectionBlueStart;
     }
   }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -391,7 +382,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   CircleAvatar(
                     radius: 80.w,
                     backgroundColor: AppColors.surface,
-                    backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
+                    backgroundImage: resolveProfileImage(photoUrl),
                     child: photoUrl == null 
                       ? Icon(Icons.person, size: 80.w, color: Colors.white24)
                       : null,

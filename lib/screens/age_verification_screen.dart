@@ -8,7 +8,8 @@ import '../widgets/app_dialogs.dart';
 import 'matches_screen.dart';
 
 class AgeVerificationScreen extends StatefulWidget {
-  const AgeVerificationScreen({super.key});
+  final Map<String, dynamic>? registrationData;
+  const AgeVerificationScreen({super.key, this.registrationData});
 
   @override
   State<AgeVerificationScreen> createState() => _AgeVerificationScreenState();
@@ -24,25 +25,61 @@ class _AgeVerificationScreenState extends State<AgeVerificationScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception("User not logged in");
-
-      // Save age range to Firestore
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'ageRange': _selectedAgeRange,
-        'registrationCompleted': true,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      // NEW: Run auto-generation of initial team and Bronze league
-      await UserService.initializeNewUser(user.uid);
-
-      if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => MatchesScreen()),
-          (route) => false,
+      if (widget.registrationData != null) {
+        // Deferred Email/Password Registration Flow
+        final data = widget.registrationData!;
+        
+        final UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: data['email'],
+          password: data['password'],
         );
+
+        final user = userCredential.user!;
+        await user.updateDisplayName(data['username']);
+
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'fullName': data['fullName'],
+          'email': data['email'],
+          'username': data['username'],
+          'photoUrl': data['photoUrl'],
+          'themeColor': data['themeColor'],
+          'ageRange': _selectedAgeRange,
+          'registrationCompleted': true,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        await UserService.initializeNewUser(user.uid);
+
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => MatchesScreen()),
+            (route) => false,
+          );
+        }
+      } else {
+        // Google Sign-In Flow
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) throw Exception("User not logged in");
+
+        // Save age range to Firestore
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'ageRange': _selectedAgeRange,
+          'registrationCompleted': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        // NEW: Run auto-generation of initial team and Bronze league
+        await UserService.initializeNewUser(user.uid);
+
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => MatchesScreen()),
+            (route) => false,
+          );
+        }
       }
     } catch (e) {
       if (mounted) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../core/colors.dart';
 import '../core/responsive_helper.dart';
 import '../services/player_service.dart';
@@ -160,11 +161,11 @@ class _ScoutPlayersScreenState extends State<ScoutPlayersScreen> {
       ),
       child: Row(
         children: [
-          Expanded(flex: 8, child: Text("PLAYER", style: _headerStyle)),
+          Expanded(flex: 7, child: Text("PLAYER", style: _headerStyle)),
           Expanded(flex: 3, child: Center(child: Text("POSITION", style: _headerStyle))),
           Expanded(flex: 2, child: Center(child: Text("ADP", style: _headerStyle))),
           Expanded(flex: 4, child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text("PROJ. SPS (CONF)", style: _headerStyle)))),
-          Expanded(flex: 3, child: Center(child: Text("ACTION", style: _headerStyle))),
+          Expanded(flex: 4, child: Center(child: Text("ACTION", style: _headerStyle))),
         ],
       ),
     );
@@ -195,7 +196,7 @@ class _ScoutPlayersScreenState extends State<ScoutPlayersScreen> {
             children: [
               // PLAYER name with Image
               Expanded(
-                flex: 8,
+                flex: 7,
                 child: Row(
                   children: [
                     Container(
@@ -208,11 +209,11 @@ class _ScoutPlayersScreenState extends State<ScoutPlayersScreen> {
                       ),
                       child: ClipOval(
                         child: player['player_id'] != null
-                            ? Image.network(
-                                "https://sleepercdn.com/content/nfl/players/thumb/${player['player_id']}.jpg",
+                            ? CachedNetworkImage(
+                                imageUrl: "https://sleepercdn.com/content/nfl/players/thumb/${player['player_id']}.jpg",
                                 fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) => 
-                                    const Icon(Icons.person, color: Colors.white24, size: 20),
+                                placeholder: (context, url) => const CircularProgressIndicator(strokeWidth: 1),
+                                errorWidget: (context, url, error) => const Icon(Icons.person, color: Colors.white24, size: 20),
                               )
                             : const Icon(Icons.person, color: Colors.white24, size: 20),
                       ),
@@ -273,39 +274,42 @@ class _ScoutPlayersScreenState extends State<ScoutPlayersScreen> {
               ),
               // ACTION
               Expanded(
-                flex: 3,
+                flex: 4,
                 child: Center(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      GestureDetector(
-                        onTap: () => _showScoutOptions(player, confidence),
-                        child: Container(
-                          padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 6.h),
-                          decoration: BoxDecoration(
-                            color: AppColors.surface,
-                            borderRadius: BorderRadius.circular(8.h),
-                            border: Border.all(color: AppColors.accentCyan.withOpacity(0.3)),
-                          ),
-                          child: Icon(Icons.analytics_outlined, color: AppColors.accentCyan, size: 14.w),
-                        ),
-                      ),
-                      SizedBox(width: 6.w),
-                      GestureDetector(
-                        onTap: () => _showBidDialog(player),
-                        child: Container(
-                          padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 6.h),
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(colors: [AppColors.accentCyan, AppColors.createGradientPurple]),
-                            borderRadius: BorderRadius.circular(8.h),
-                          ),
-                          child: Text(
-                            "BID",
-                            style: TextStyle(color: Colors.black, fontSize: 10.sp, fontWeight: FontWeight.w900),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        GestureDetector(
+                          onTap: () => _showScoutOptions(player, confidence),
+                          child: Container(
+                            padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 6.h),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(8.h),
+                              border: Border.all(color: AppColors.accentCyan.withOpacity(0.3)),
+                            ),
+                            child: Icon(Icons.analytics_outlined, color: AppColors.accentCyan, size: 14.w),
                           ),
                         ),
-                      ),
-                    ],
+                        SizedBox(width: 6.w),
+                        GestureDetector(
+                          onTap: () => _showBidDialog(player),
+                          child: Container(
+                            padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 6.h),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(colors: [AppColors.accentCyan, AppColors.createGradientPurple]),
+                              borderRadius: BorderRadius.circular(8.h),
+                            ),
+                            child: Text(
+                              "BID",
+                              style: TextStyle(color: Colors.black, fontSize: 10.sp, fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

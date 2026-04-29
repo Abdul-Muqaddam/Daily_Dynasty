@@ -52,7 +52,7 @@ service cloud.firestore {
     
     // Mail collection
     match /mail/{docId} {
-      allow create: if request.auth != null;
+      allow create: if true;
     }
   }
 }

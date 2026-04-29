@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/coin_market_service.dart';
 import '../services/user_service.dart';
 import '../core/colors.dart';
@@ -336,13 +337,15 @@ class _PlayerProfileScreenState extends State<PlayerProfileScreen> {
             borderRadius: BorderRadius.circular(20.h),
             border: Border.all(color: Colors.white10),
           ),
+
           child: ClipRRect(
             borderRadius: BorderRadius.circular(20.h),
             child: widget.player?['player_id'] != null
-                ? Image.network(
-                    "https://sleepercdn.com/content/nfl/players/thumb/${widget.player!['player_id']}.jpg",
+                ? CachedNetworkImage(
+                    imageUrl: "https://sleepercdn.com/content/nfl/players/thumb/${widget.player!['player_id']}.jpg",
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => 
+                    placeholder: (context, url) => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                    errorWidget: (context, url, error) => 
                         Icon(Icons.person, size: 80.w, color: Colors.white24),
                   )
                 : Icon(Icons.person, size: 80.w, color: Colors.white24),

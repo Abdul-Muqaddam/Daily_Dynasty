@@ -65,7 +65,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           if (registrationCompleted) {
             _navigateTo(MatchesScreen());
           } else {
-            _navigateTo(const CreateUsernameScreen());
+            // User left in between registration. Delete incomplete account and restart.
+            try {
+              await FirebaseFirestore.instance.collection('users').doc(user.uid).delete();
+              await user.delete();
+            } catch (_) {}
+            await FirebaseAuth.instance.signOut();
+            _navigateTo(const LoginScreen());
           }
         } catch (e) {
           // If fetching user document fails (e.g. offline), 
