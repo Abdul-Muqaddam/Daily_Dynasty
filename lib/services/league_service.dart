@@ -9,8 +9,21 @@ class LeagueService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
   static final FirebaseAuth _auth = FirebaseAuth.instance;
   static const int REGULAR_SEASON_WEEKS = 8;
+  static const List<String> TIER_ORDER = ['Rookie', 'Pro', 'Legendary', 'Hall of Fame'];
+
+  static String getNextTier(String currentTier) {
+    int idx = TIER_ORDER.indexOf(currentTier);
+    if (idx != -1 && idx < TIER_ORDER.length - 1) {
+      return TIER_ORDER[idx + 1];
+    }
+    return currentTier;
+  }
 
   static User? get currentUser => _auth.currentUser;
+  
+  // Global state to track which league the user is currently interacting with
+  static Map<String, dynamic>? activeLeague;
+  static String? get activeLeagueId => activeLeague?['id'];
 
   /// Generates a unique 6-character alphanumeric join code.
   static Future<String> generateJoinCode() async {
@@ -38,6 +51,7 @@ class LeagueService {
     int maxMembers = 10,
     String scoringType = 'standard',
     bool allowPublicJoin = false,
+    String tier = 'Rookie',
   }) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
@@ -59,6 +73,7 @@ class LeagueService {
         'allowPublicJoin': allowPublicJoin,
         'tradeDeadline': null,
       },
+      'tier': tier,
     });
 
     await docRef.update({'members': [user.uid]}); // Ensure creator is in members before pick init
@@ -70,10 +85,10 @@ class LeagueService {
     return docRef.id;
   }
 
-  /// Sets up the initial Bronze-tier offline league for a new user.
-  static Future<String> setupInitialBronzeLeague(String userId) async {
+  /// Sets up the initial Rookie-tier offline league for a new user.
+  static Future<String> setupInitialRookieLeague(String userId) async {
     final leagueCode = await generateJoinCode();
-    final leagueName = "BRONZE LEAGUE ${leagueCode.substring(0, 3)}";
+    final leagueName = "ROOKIE LEAGUE ${leagueCode.substring(0, 3)}";
 
     // 1. Create the league document
     final docRef = await _db.collection('leagues').add({
@@ -85,7 +100,7 @@ class LeagueService {
       'maxMembers': 12,
       'scoringType': 'standard',
       'members': [userId],
-      'tier': 'Bronze',
+      'tier': 'Rookie',
       'isOffline': true,
       'settings': {
         'allowPublicJoin': false,
@@ -95,35 +110,76 @@ class LeagueService {
 
     final leagueId = docRef.id;
 
-    // 2. Initialize the user's roster with random players (43-47 grade)
-    await initializeRoster(leagueId, userId);
+    // 2. Initialize the user's roster with full random team (43-47 grade)
+    final userRosterRef = _db.collection('leagues').doc(leagueId).collection('rosters').doc(userId);
+    final starters = PlayerService.generateInitialTeam(minGrade: 43, maxGrade: 47);
 
-    // 3. Generate 11 bot teams (grades 50-65)
-    await _generateBotTeams(leagueId);
+    await userRosterRef.set({
+      'players': starters,
+      'faabBalance': 100,
+      'teamGrade': 45,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    // 3. Populate with 11 bot teams immediately
+    await fillRemainingWithBots(leagueId);
 
     return leagueId;
   }
 
-  /// Generates 11 bot teams for a league.
-  static Future<void> _generateBotTeams(String leagueId) async {
+  /// Fills the remaining slots in a league with computer-controlled teams.
+  static Future<void> fillRemainingWithBots(String leagueId) async {
+    final leagueDoc = await _db.collection('leagues').doc(leagueId).get();
+    if (!leagueDoc.exists) return;
+
+    final data = leagueDoc.data()!;
+    final int maxMembers = data['maxMembers'] as int? ?? 12;
+    final List<String> members = List<String>.from(data['members'] ?? []);
+    final int needed = maxMembers - members.length;
+    if (needed <= 0) return;
+
+    final String tier = data['tier']?.toString() ?? 'Rookie';
+    int minGrade = 50;
+    int maxGrade = 65;
+
+    // Progression difficulty scaling
+    if (tier == 'Pro') {
+      minGrade = 60;
+      maxGrade = 75;
+    } else if (tier == 'Legendary') {
+      minGrade = 70;
+      maxGrade = 85;
+    } else if (tier == 'Hall of Fame') {
+      minGrade = 80;
+      maxGrade = 95;
+    }
+
     final random = math.Random();
     final botNames = [
-      "Steelers Bot", "Comets Bot", "Titans Bot", "Raptors Bot", 
-      "Vikings Bot", "Dragons Bot", "Ravens Bot", "Warriors Bot",
-      "Lions Bot", "Wolves Bot", "Panthers Bot"
-    ];
+      "Apex Predators", "Blue Wave", "Iron Legion", "Desert Hawks", 
+      "Neon Knights", "Shadow Stalkers", "Lunar Eclipse", "Tidal Giants",
+      "Frost Giants", "Storm Chasers", "Nova Blaze", "Wildcards", 
+      "Titans", "Avengers", "Spartans", "Vikings", "Outlaws", "Reapers"
+    ]..shuffle();
+    
+    final ownerNames = [
+      "M. Rivers", "J. Stone", "C. Vance", "L. Hayes", 
+      "A. Sterling", "K. Thorne", "S. Rhodes", "D. Wilder",
+      "P. Archer", "R. Frost", "B. Knight", "G. Miller", 
+      "H. Ward", "S. Cole", "T. West", "V. Gray", "X. King"
+    ]..shuffle();
 
     final batch = _db.batch();
 
-    for (var i = 0; i < 11; i++) {
-      final botId = "bot_${leagueId}_$i";
-      final botGrade = 50 + random.nextInt(16); // 50-65
+    for (var i = 0; i < needed; i++) {
+      final botId = "bot_${leagueId}_${DateTime.now().millisecondsSinceEpoch}_$i";
+      final botGrade = minGrade + random.nextInt(maxGrade - minGrade + 1);
 
       // Bot User Record
       final userRef = _db.collection('users').doc(botId);
       batch.set(userRef, {
-        'username': botNames[i],
-        'teamName': botNames[i].toUpperCase(),
+        'username': ownerNames[i % ownerNames.length],
+        'teamName': botNames[i % botNames.length].toUpperCase(),
         'isBot': true,
         'registrationCompleted': true,
         'createdAt': FieldValue.serverTimestamp(),
@@ -134,14 +190,9 @@ class LeagueService {
         'members': FieldValue.arrayUnion([botId])
       });
 
-      // Bot Roster (random players 50-65 grade)
+      // Bot Roster (random players based on tier difficulty)
       final rosterRef = _db.collection('leagues').doc(leagueId).collection('rosters').doc(botId);
-      final botRoster = <Map<String, dynamic>>[];
-      // For bots, we can just store the average grade or a simplified roster if full roster isn't needed yet.
-      // But let's generate some placeholder players for consistency.
-      for (int p = 0; p < 33; p++) {
-        botRoster.add(PlayerService.generateRandomPlayer(pos: 'BOT', minGrade: 50, maxGrade: 65));
-      }
+      final botRoster = PlayerService.generateInitialTeam(minGrade: minGrade, maxGrade: maxGrade);
 
       batch.set(rosterRef, {
         'players': botRoster,
@@ -177,11 +228,21 @@ class LeagueService {
     return _db
         .collection('leagues')
         .where('members', arrayContains: user.uid)
-        .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => {'id': doc.id, ...doc.data()})
-            .toList());
+        .map((snapshot) {
+          final leagues = snapshot.docs
+              .map((doc) => {'id': doc.id, ...doc.data()})
+              .toList();
+          
+          // Sort locally by createdAt descending
+          leagues.sort((a, b) {
+            final dateA = (a['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
+            final dateB = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
+            return dateB.compareTo(dateA);
+          });
+          
+          return leagues;
+        });
   }
 
   /// Fetches all public leagues that are not full and still in pending draft state.
@@ -314,6 +375,24 @@ class LeagueService {
     return members;
   }
 
+  /// Fetches league members and their team grades for the standings.
+  static Future<List<Map<String, dynamic>>> getLeagueMembersWithGrades(String leagueId, List<String> memberUids) async {
+    final members = await getLeagueMembers(memberUids);
+    
+    // Enrich with grades from rosters subcollection
+    for (var member in members) {
+      final rosterDoc = await _db.collection('leagues').doc(leagueId).collection('rosters').doc(member['uid']).get();
+      if (rosterDoc.exists) {
+        final data = rosterDoc.data();
+        member['teamGrade'] = (data?['teamGrade'] as num? ?? 0).toDouble();
+      } else {
+        member['teamGrade'] = 0.0;
+      }
+    }
+    
+    return members;
+  }
+
   /// Fetches a user's roster within a specific league.
   static Future<List<Map<String, dynamic>>> getUserRoster(String leagueId, String userId) async {
     final doc = await _db
@@ -347,7 +426,7 @@ class LeagueService {
         return players
             .map((p) => Map<String, dynamic>.from(p))
             // Only include real players — generated mock players have no playerId
-            .where((p) => p.containsKey('playerId') && p['playerId'] != null)
+            .where((p) => (p.containsKey('playerId') && p['playerId'] != null) || (p.containsKey('name') && p['name'] != null))
             .toList();
       }
       return [];
@@ -364,6 +443,21 @@ class LeagueService {
         .set({
       'players': [], // Roster starts empty — players are added via draft/free agency
       'faabBalance': 100,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Fills a specific user's roster with bot players.
+  static Future<void> fillUserRosterWithBots(String leagueId, String userId) async {
+    final starters = PlayerService.generateInitialTeam(minGrade: 43, maxGrade: 47);
+    await _db
+        .collection('leagues')
+        .doc(leagueId)
+        .collection('rosters')
+        .doc(userId)
+        .update({
+      'players': starters,
+      'teamGrade': 45,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -591,6 +685,11 @@ class LeagueService {
       playoffs['status'] = 'completed';
       playoffs['finals'] = finals;
       playoffs['champion'] = finals['winner'];
+
+      // If a human wins, unlock the next tier
+      if (playoffs['champion'] != null) {
+        await _processLeagueCompletion(leagueId, playoffs['champion']);
+      }
     }
 
     batch.update(leagueRef, {
@@ -609,6 +708,27 @@ class LeagueService {
     }
     for (var uid in participants) {
       await resetTemporaryBoosts(leagueId, uid);
+    }
+  }
+
+  static Future<void> _processLeagueCompletion(String leagueId, String winnerId) async {
+    final userDoc = await _db.collection('users').doc(winnerId).get();
+    if (!userDoc.exists) return;
+    
+    final userData = userDoc.data()!;
+    if (userData['isBot'] == true) return; // Bots don't unlock tiers
+
+    final leagueDoc = await _db.collection('leagues').doc(leagueId).get();
+    if (!leagueDoc.exists) return;
+    
+    final leagueTier = leagueDoc.data()?['tier']?.toString() ?? 'Rookie';
+    final nextTier = getNextTier(leagueTier);
+
+    if (nextTier != leagueTier) {
+      // Unlock the next tier for the user
+      await _db.collection('users').doc(winnerId).update({
+        'unlockedTiers': FieldValue.arrayUnion([nextTier])
+      });
     }
   }
 

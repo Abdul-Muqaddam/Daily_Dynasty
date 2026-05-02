@@ -16,6 +16,9 @@ import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'player_profile_screen.dart';
 import '../../widgets/profile_avatar.dart';
+import 'team_details_screen.dart';
+import 'commissioner_tools_screen.dart';
+import 'draft_room_screen.dart';
 
 class LeagueDetailsScreen extends StatefulWidget {
   final Map<String, dynamic> league;
@@ -44,9 +47,13 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
   bool _isLeagueStandingsView = true;
   final Set<String> _selectedPlayerIds = {}; // Track selected players for batch actions
 
+  late Stream<DocumentSnapshot> _leagueStream;
+
   @override
   void initState() {
     super.initState();
+    LeagueService.activeLeague = widget.league;
+    _leagueStream = FirebaseFirestore.instance.collection('leagues').doc(widget.league['id']).snapshots();
     _fetchMembers();
     _loadPlayers();
   }
@@ -76,9 +83,13 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
   }
 
   Future<void> _fetchMembers() async {
+    final uids = List<String>.from(widget.league['members'] ?? []);
+    await _fetchMembersForUids(uids);
+  }
+
+  Future<void> _fetchMembersForUids(List<String> uids) async {
     try {
-      final uids = List<String>.from(widget.league['members'] ?? []);
-      final members = await LeagueService.getLeagueMembers(uids);
+      final members = await LeagueService.getLeagueMembersWithGrades(widget.league['id'], uids);
       if (mounted) {
         setState(() {
           _members = members;
@@ -90,6 +101,15 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  String _getTeamOutlook(double grade) {
+    if (grade >= 60) return "CONTENDER";
+    if (grade >= 55) return "POWERHOUSE";
+    if (grade >= 50) return "MID-TIER";
+    if (grade >= 46) return "REBUILDING";
+    if (grade > 0) return "UNDERDOG";
+    return "---";
   }
 
   Color _getPositionColor(String position) {
@@ -145,7 +165,31 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
 
     return DefaultTabController(
       length: 4,
-      child: Scaffold(
+      child: StreamBuilder<DocumentSnapshot>(
+        stream: _leagueStream,
+        builder: (context, snapshot) {
+          final leagueData = snapshot.hasData && snapshot.data!.exists 
+              ? {'id': snapshot.data!.id, ...(snapshot.data!.data() as Map<String, dynamic>)} 
+              : widget.league;
+          
+          final name = leagueData['name'] as String? ?? 'LEAGUE DETAILS';
+          final joinCode = leagueData['joinCode'] as String? ?? '------';
+          final dynamic maxMembersRaw = leagueData['maxMembers'];
+          final int maxMembers = maxMembersRaw is num ? maxMembersRaw.toInt() : int.tryParse(maxMembersRaw?.toString() ?? '10') ?? 10;
+          final draftStatus = leagueData['draftStatus'] as String? ?? 'pending';
+          final scoringType = (leagueData['scoringType'] as String? ?? 'standard').toUpperCase().replaceAll('_', ' ');
+
+          final dynamic settingsRaw = leagueData['settings'];
+          final settings = settingsRaw is Map ? Map<String, dynamic>.from(settingsRaw) : {};
+          final isPublic = settings['allowPublicJoin'] as bool? ?? false;
+          final List<String> currentMembers = List<String>.from(leagueData['members'] ?? []);
+
+          // Auto-trigger fetch if member count changed
+          if (currentMembers.length != _members.length && !_isLoading) {
+             Future.microtask(() => _fetchMembersForUids(currentMembers));
+          }
+
+          return Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
           backgroundColor: AppColors.background,
@@ -164,6 +208,17 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
             ),
           ),
           centerTitle: true,
+          actions: [
+            if (leagueData['createdBy'] == LeagueService.currentUser?.uid)
+              IconButton(
+                icon: const Icon(Icons.admin_panel_settings_rounded, color: AppColors.accentCyan),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => CommissionerToolsScreen(leagueId: leagueData['id'] as String)),
+                ),
+              ),
+            SizedBox(width: 8.w),
+          ],
         ),
         body: Column(
           children: [
@@ -192,7 +247,7 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _buildStatCol(Icons.people, '${widget.league['members']?.length ?? 1}/$maxMembers', 'MEMBERS'),
+                      _buildStatCol(Icons.people, '${currentMembers.length}/$maxMembers', 'MEMBERS'),
                       _buildStatCol(Icons.scoreboard, scoringType, 'SCORING'),
                       _buildStatCol(
                         isPublic ? Icons.public : Icons.lock_outline, 
@@ -218,6 +273,57 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                           Text('JOIN CODE:', style: TextStyle(color: Colors.white54, fontSize: 12.sp, fontWeight: FontWeight.bold)),
                           Text(joinCode, style: TextStyle(color: AppColors.accentCyan, fontSize: 18.sp, fontWeight: FontWeight.w900, letterSpacing: 4.0)),
                         ],
+                      ),
+                    ),
+                  ],
+                  if (leagueData['createdBy'] == FirebaseAuth.instance.currentUser?.uid && 
+                      currentMembers.length < maxMembers) ...[
+                    SizedBox(height: 16.h),
+                    GestureDetector(
+                      onTap: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            backgroundColor: AppColors.surface,
+                            title: const Text("FILL WITH BOTS?", style: TextStyle(color: Colors.white)),
+                            content: Text("This will fill the remaining ${maxMembers - currentMembers.length} slots with computer-controlled teams so you can start playing immediately.", style: const TextStyle(color: Colors.white70)),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("CANCEL", style: TextStyle(color: Colors.white54))),
+                              TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("FILL SLOTS", style: TextStyle(color: AppColors.accentCyan, fontWeight: FontWeight.bold))),
+                            ],
+                          ),
+                        );
+                        
+                        if (confirmed == true) {
+                          try {
+                            await LeagueService.fillRemainingWithBots(leagueData['id']);
+                            if (mounted) {
+                              AppDialogs.showSuccessDialog(context, title: "LEAGUE FILLED", message: "AI teams have joined the league!");
+                            }
+                          } catch (e) {
+                            if (mounted) AppDialogs.showPremiumErrorDialog(context, message: "Failed to fill bots: $e");
+                          }
+                        }
+                      },
+                      child: Container(
+                        padding: EdgeInsets.symmetric(vertical: 12.h),
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: AppColors.accentCyan.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12.h),
+                          border: Border.all(color: AppColors.accentCyan.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.smart_toy_rounded, color: AppColors.accentCyan, size: 18.sp),
+                            SizedBox(width: 8.w),
+                            Text(
+                              "FILL WITH BOTS",
+                              style: TextStyle(color: AppColors.accentCyan, fontSize: 11.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -254,9 +360,11 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
+      );
+    }
+  ),
+);
+}
 
   Widget _buildDraftTab(int maxMembers) {
     if (_isLoading) {
@@ -633,47 +741,79 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
   }
 
   Widget _buildMemberCard(Map<String, dynamic> member, bool isCreator) {
-    return Container(
-      margin: EdgeInsets.only(bottom: 12.h),
-      padding: EdgeInsets.all(16.w),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16.h),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 20.w,
-            backgroundColor: AppColors.accentCyan.withOpacity(0.2),
-            backgroundImage: resolveProfileImage(member['photoUrl'] as String?),
-            child: resolveProfileImage(member['photoUrl'] as String?) == null
-                ? Icon(Icons.person, color: AppColors.accentCyan, size: 24.w)
-                : null,
-          ),
-          SizedBox(width: 16.w),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _getDisplayName(member),
-                  style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.bold),
-                ),
-                SizedBox(height: 4.h),
-                Text(
-                  'NO DRAFT POSITION',
-                  style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold),
-                ),
-                if (isCreator)
-                  Padding(
-                    padding: EdgeInsets.only(top: 4.h),
-                    child: Text('COMMISSIONER', style: TextStyle(color: AppColors.accentCyan, fontSize: 10.sp, fontWeight: FontWeight.w900)),
-                  ),
-              ],
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => TeamDetailsScreen(
+              leagueId: widget.league['id'],
+              userId: member['uid'],
+              teamName: _getDisplayName(member),
+              username: member['username']?.toString(),
+              photoUrl: member['photoUrl'] as String?,
             ),
           ),
-        ],
+        );
+      },
+      child: Container(
+        margin: EdgeInsets.only(bottom: 12.h),
+        padding: EdgeInsets.all(16.w),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16.h),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20.w,
+              backgroundColor: AppColors.accentCyan.withOpacity(0.2),
+              backgroundImage: resolveProfileImage(member['photoUrl'] as String?),
+              child: resolveProfileImage(member['photoUrl'] as String?) == null
+                  ? Icon(Icons.person, color: AppColors.accentCyan, size: 24.w)
+                  : null,
+            ),
+            SizedBox(width: 16.w),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _getDisplayName(member),
+                    style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 4.h),
+                   Row(
+                    children: [
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentCyan.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(4.h),
+                        ),
+                        child: Text(
+                          "SPS: ${member['teamGrade']?.toStringAsFixed(1) ?? '0.0'}",
+                          style: TextStyle(color: AppColors.accentCyan, fontSize: 9.sp, fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                      SizedBox(width: 8.w),
+                      Text(
+                        _getTeamOutlook((member['teamGrade'] as num? ?? 0).toDouble()),
+                        style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  if (isCreator)
+                    Padding(
+                      padding: EdgeInsets.only(top: 4.h),
+                      child: Text('COMMISSIONER', style: TextStyle(color: AppColors.accentCyan, fontSize: 10.sp, fontWeight: FontWeight.w900)),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -849,6 +989,7 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
     final teams = List.generate(numTeams, (i) {
       if (i < _members.length) {
         final member = _members[i];
+        final grade = (member['teamGrade'] as num? ?? 0).toDouble();
         return {
           'rank': i + 1,
           'name': _getDisplayName(member),
@@ -856,7 +997,9 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
           'record': '0-0',
           'waiver': i + 1,
           'pf': '0.00',
-          'pa': '0'
+          'pa': '0',
+          'isBot': member['isBot'] ?? false,
+          'outlook': _getTeamOutlook(grade),
         };
       } else {
         return {
@@ -866,7 +1009,9 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
           'record': '---',
           'waiver': '-',
           'pf': '-',
-          'pa': '-'
+          'pa': '-',
+          'isBot': false,
+          'outlook': '---',
         };
       }
     });
@@ -878,11 +1023,11 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
           padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 12.h),
           child: Row(
             children: [
-              SizedBox(width: 32.w, child: Text('RANK', style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold))),
-              Expanded(child: Text('NAME', style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold))),
-              SizedBox(width: 60.w, child: Text('WAIVER', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold))),
-              SizedBox(width: 50.w, child: Text('PF', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold))),
-              SizedBox(width: 40.w, child: Text('PA', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold))),
+              SizedBox(width: 88.w, child: Text('RANK / TEAM', style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold))),
+              const Expanded(child: SizedBox()),
+              SizedBox(width: 60.w, child: Text('WAIVER', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold))),
+              SizedBox(width: 50.w, child: Text('PF', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold))),
+              SizedBox(width: 40.w, child: Text('PA', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 9.sp, fontWeight: FontWeight.bold))),
             ],
           ),
         ),
@@ -903,9 +1048,27 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
               else if (rank == 2) crownColor = const Color(0xFFC0C0C0);
               else if (rank == 3) crownColor = const Color(0xFFCD7F32);
 
-              return Padding(
-                padding: EdgeInsets.only(bottom: 24.h),
-                child: Row(
+              return GestureDetector(
+                onTap: () {
+                  if (index < _members.length) {
+                    final member = _members[index];
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => TeamDetailsScreen(
+                          leagueId: widget.league['id'],
+                          userId: member['uid'],
+                          teamName: team['name'].toString(),
+                          username: member['username']?.toString(),
+                          photoUrl: team['photoUrl'] as String?,
+                        ),
+                      ),
+                    );
+                  }
+                },
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: 24.h),
+                  child: Row(
                   children: [
                     // Rank
                     SizedBox(
@@ -956,16 +1119,60 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            team['name'].toString(),
-                            style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.bold),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  team['name'].toString(),
+                                  style: TextStyle(color: Colors.white, fontSize: 14.sp, fontWeight: FontWeight.bold),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (team['isBot'] == true) ...[
+                                SizedBox(width: 6.w),
+                                Icon(Icons.smart_toy_rounded, color: AppColors.accentCyan.withOpacity(0.4), size: 12.sp),
+                              ],
+                            ],
                           ),
                           SizedBox(height: 2.h),
-                          Text(
-                            team['record'].toString(),
-                            style: TextStyle(color: Colors.white54, fontSize: 12.sp),
+                          Row(
+                            children: [
+                              Text(
+                                team['record'].toString(),
+                                style: TextStyle(color: Colors.white54, fontSize: 11.sp, fontWeight: FontWeight.bold),
+                              ),
+                              SizedBox(width: 8.w),
+                              Flexible(
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                                  decoration: BoxDecoration(
+                                    color: (team['outlook'] == 'CONTENDER' || team['outlook'] == 'POWERHOUSE')
+                                        ? Colors.redAccent.withOpacity(0.1)
+                                        : AppColors.accentCyan.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4.h),
+                                    border: Border.all(
+                                      color: (team['outlook'] == 'CONTENDER' || team['outlook'] == 'POWERHOUSE')
+                                          ? Colors.redAccent.withOpacity(0.2)
+                                          : AppColors.accentCyan.withOpacity(0.2),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    team['outlook'].toString(),
+                                    style: TextStyle(
+                                      color: (team['outlook'] == 'CONTENDER' || team['outlook'] == 'POWERHOUSE')
+                                          ? Colors.redAccent
+                                          : AppColors.accentCyan,
+                                      fontSize: 7.sp,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.5,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -997,10 +1204,11 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                     ),
                   ],
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
+      ),
         
         // Bottom Activity Divider and Section
         Container(
@@ -1140,6 +1348,8 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
               ),
               
               SizedBox(height: 48.h),
+              
+              SizedBox(height: 48.h),
             ],
           ),
         ),
@@ -1257,6 +1467,24 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
     );
   }
 
+  double _calculateTeamSps(List<Map<String, dynamic>> roster) {
+    if (roster.isEmpty) return 0.0;
+    
+    // Only count starters for the overall team SPS
+    final starters = roster.where((p) {
+      final pos = p['pos']?.toString() ?? "";
+      return ["QB", "RB1", "RB2", "WR1", "WR2", "WR3", "TE", "FLEX", "SFLEX", "RB", "WR"].contains(pos);
+    }).toList();
+
+    if (starters.isEmpty) return 0.0;
+    
+    double total = 0.0;
+    for (var p in starters) {
+      total += double.tryParse(p['sps']?.toString() ?? "0.0") ?? 0.0;
+    }
+    return total / starters.length;
+  }
+
   Widget _buildTeamTab() {
     final userId = LeagueService.currentUser?.uid;
     final leagueId = widget.league['id'] as String?;
@@ -1282,6 +1510,9 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
 
                 final players = rosterSnap.data ?? [];
                 final picks = picksSnap.data ?? [];
+                
+                // Calculate SPS reactively from the stream
+                final teamSps = _calculateTeamSps(players);
 
                 // 10 standard starter slots
                 final List<String> rosterSlots = [
@@ -1291,9 +1522,10 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
 
                 // Map players to starter slots
                 final List<Map<String, dynamic>?> starterRows = List.filled(rosterSlots.length, null);
+                // Include everyone EXCEPT IR and TAXI in the pool for starters
                 final List<Map<String, dynamic>> unassignedStarters = List.from(players.where((p) {
                    final pos = p['pos']?.toString().toUpperCase() ?? 'BN';
-                   return !pos.startsWith('BN') && !pos.startsWith('TAXI') && !pos.startsWith('IR');
+                   return !pos.startsWith('TAXI') && !pos.startsWith('IR');
                 }));
 
                 // Slot-matching logic — supports FLEX (WRT) and SFLEX (anyone)
@@ -1301,12 +1533,27 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                   final slot = rosterSlots[i];
                   for (int j = 0; j < unassignedStarters.length; j++) {
                     final p = unassignedStarters[j];
-                    final pPos = p['pos']?.toString().toUpperCase() ?? '';
-                    final isFlexEligible = pPos == 'WR' || pPos == 'RB' || pPos == 'TE';
-                    final isSuperFlexEligible = isFlexEligible || pPos == 'QB';
-                    if (slot == pPos ||
-                        (slot == 'WRT' && isFlexEligible) ||
-                        (slot == 'SFLEX' && isSuperFlexEligible)) {
+                    final pPos = (p['primaryPos'] ?? p['pos'])?.toString().toUpperCase() ?? '';
+                    
+                    final isQB = pPos.startsWith('QB');
+                    final isRB = pPos.startsWith('RB');
+                    final isWR = pPos.startsWith('WR');
+                    final isTE = pPos.startsWith('TE');
+                    final isK = pPos.startsWith('K');
+                    
+                    final isFlexEligible = isWR || isRB || isTE;
+                    final isSuperFlexEligible = isFlexEligible || isQB;
+
+                    bool matches = false;
+                    if (slot == 'QB' && isQB) matches = true;
+                    else if (slot == 'RB' && isRB) matches = true;
+                    else if (slot == 'WR' && isWR) matches = true;
+                    else if (slot == 'TE' && isTE) matches = true;
+                    else if (slot == 'K' && isK) matches = true;
+                    else if ((slot == 'WRT' || slot == 'FLEX') && isFlexEligible) matches = true;
+                    else if (slot == 'SFLEX' && isSuperFlexEligible) matches = true;
+
+                    if (matches) {
                       starterRows[i] = p;
                       unassignedStarters.removeAt(j);
                       break;
@@ -1336,7 +1583,40 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                   padding: EdgeInsets.symmetric(horizontal: 24.w),
                   children: [
                     SizedBox(height: 24.h),
-                    _buildTeamHeader(teamName, username),
+                    if (widget.league['tier'] == 'Rookie' && players.isNotEmpty) 
+                      _buildTutorialCard(),
+                    _buildTeamHeader(teamName, username, teamSps),
+                    if (players.isEmpty) 
+                      Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32.h),
+                        child: GestureDetector(
+                          onTap: () async {
+                            await LeagueService.fillUserRosterWithBots(leagueId, userId);
+                          },
+                          child: Container(
+                            width: double.infinity,
+                            padding: EdgeInsets.symmetric(vertical: 16.h),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(colors: [AppColors.accentCyan, AppColors.accentTeal]),
+                              borderRadius: BorderRadius.circular(12.h),
+                              boxShadow: [
+                                BoxShadow(color: AppColors.accentCyan.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4)),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.auto_awesome, color: AppColors.background, size: 20.w),
+                                SizedBox(width: 12.w),
+                                Text(
+                                  "GENERATE INITIAL TEAM",
+                                  style: TextStyle(color: AppColors.background, fontSize: 13.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     // --- 10 Starter Slots ---
                     _buildTeamSectionHeader("Starters"),
                     ...List.generate(rosterSlots.length, (i) {
@@ -1362,6 +1642,11 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                       ...picksList.map((p) => _buildPickRow(p)),
                     ],
                     SizedBox(height: 32.h),
+                    
+                    // --- Scouting Area below roster ---
+                    _buildTopProspectsSection(),
+                    
+                    SizedBox(height: 48.h),
                   ],
                 );
               },
@@ -1372,7 +1657,7 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
     );
   }
 
-  Widget _buildTeamHeader(String teamName, String username) {
+  Widget _buildTeamHeader(String teamName, String username, double teamSps) {
     return Container(
       margin: EdgeInsets.only(bottom: 16.h),
       padding: EdgeInsets.all(20.w),
@@ -1393,42 +1678,41 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
         children: [
           Row(
             children: [
-              Stack(
-                children: [
-                  Container(
-                    padding: EdgeInsets.all(12.w),
-                    decoration: BoxDecoration(
-                      color: AppColors.accentCyan.withOpacity(0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.shield, color: AppColors.accentCyan, size: 24.w),
-                  ),
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      padding: EdgeInsets.all(4.w),
-                      decoration: const BoxDecoration(color: AppColors.surface, shape: BoxShape.circle),
-                      child: Icon(Icons.settings, color: Colors.white38, size: 10.w),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(width: 16.w),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      teamName.toUpperCase(),
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18.sp,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.0,
-                      ),
+                    Row(
+                      children: [
+                        Stack(
+                          children: [
+                            Container(
+                              padding: EdgeInsets.all(10.w),
+                              decoration: BoxDecoration(
+                                color: AppColors.accentCyan.withOpacity(0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(Icons.shield, color: AppColors.accentCyan, size: 20.w),
+                            ),
+                          ],
+                        ),
+                        SizedBox(width: 12.w),
+                        Expanded(
+                          child: Text(
+                            teamName.toUpperCase(),
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18.sp,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.0,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                    SizedBox(height: 4.h),
+                    SizedBox(height: 8.h),
                     Row(
                       children: [
                         Text(
@@ -1442,7 +1726,45 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                           "0-0",
                           style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold),
                         ),
+                        SizedBox(width: 8.w),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 1.h),
+                          decoration: BoxDecoration(
+                            color: AppColors.accentCyan.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4.h),
+                          ),
+                          child: Text(
+                            _getTeamOutlook(teamSps),
+                            style: TextStyle(color: AppColors.accentCyan, fontSize: 7.sp, fontWeight: FontWeight.w900),
+                          ),
+                        ),
                       ],
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: 16.w),
+              // SPS Circle
+              Container(
+                width: 70.w,
+                height: 70.w,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.footballBrown, width: 4.w),
+                  gradient: const RadialGradient(
+                    colors: [AppColors.statsCircleBgStart, AppColors.statsCircleBgEnd],
+                  ),
+                  boxShadow: [
+                    BoxShadow(color: AppColors.gold.withOpacity(0.2), blurRadius: 10, spreadRadius: 2),
+                  ],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text("SPS", style: TextStyle(color: Colors.white70, fontSize: 8.sp, fontWeight: FontWeight.bold)),
+                    Text(
+                      teamSps.toStringAsFixed(1),
+                      style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.w900),
                     ),
                   ],
                 ),
@@ -1528,35 +1850,211 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
               // SET TIME Button
               Expanded(
                 flex: 2,
-                child: Container(
-                  height: 48.h,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24.h),
-                    border: Border.all(color: brandColor, width: 2),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Center(
-                          child: Text(
-                            "SET TIME",
-                            style: TextStyle(color: brandColor, fontSize: 13.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
-                          ),
-                        ),
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => DraftRoomScreen(leagueId: widget.league['id'] as String),
                       ),
-                      Container(
-                        width: 48.w,
-                        height: 48.h,
-                        decoration: BoxDecoration(
-                          border: Border(left: BorderSide(color: brandColor, width: 2)),
-                        ),
-                        child: Icon(Icons.grid_view_rounded, color: brandColor, size: 20.w),
-                      ),
-                    ],
+                    );
+                  },
+                  child: Container(
+                    height: 48.h,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(24.h),
+                      border: Border.all(color: brandColor, width: 2),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      "ENTER DRAFT ROOM",
+                      style: TextStyle(color: brandColor, fontSize: 13.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
+                    ),
                   ),
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTutorialCard() {
+    return Container(
+      margin: EdgeInsets.only(bottom: 24.h),
+      padding: EdgeInsets.all(20.w),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppColors.accentCyan, AppColors.accentTeal],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16.h),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.accentCyan.withOpacity(0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.stars_rounded, color: AppColors.background, size: 24.w),
+              SizedBox(width: 12.w),
+              Text(
+                "ROOKIE TIER GUIDE",
+                style: TextStyle(
+                  color: AppColors.background,
+                  fontSize: 14.sp,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 12.h),
+          Text(
+            "You are in the Rookie tier. Your goal is to win the championship to advance to the Pro tier. \n\nGlobal Draft: Drafts happen on the 14th and 30th/31st of every month. In the meantime, scout the prospects below to build your draft board!",
+            style: TextStyle(
+              color: AppColors.background.withOpacity(0.8),
+              fontSize: 13.sp,
+              fontWeight: FontWeight.w600,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopProspectsSection() {
+    if (_isLoadingPlayers) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.accentCyan));
+    }
+
+    // Filter top 10 prospects (highest SPS)
+    final prospects = List<Map<String, dynamic>>.from(_allPlayers);
+    prospects.sort((a, b) {
+      final spsA = double.tryParse(a['sps']?.toString() ?? '0') ?? 0.0;
+      final spsB = double.tryParse(b['sps']?.toString() ?? '0') ?? 0.0;
+      return spsB.compareTo(spsA);
+    });
+    
+    final top10 = prospects.take(10).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              "TOP 10 PROSPECTS",
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16.sp,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.0,
+              ),
+            ),
+            GestureDetector(
+              onTap: () => setState(() => _playerFilter = 2), // Switch to Available tab
+              child: Text(
+                "VIEW ALL >",
+                style: TextStyle(
+                  color: AppColors.accentCyan,
+                  fontSize: 12.sp,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 20.h),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 16.w,
+            mainAxisSpacing: 16.h,
+            childAspectRatio: 1.1,
+          ),
+          itemCount: top10.length,
+          itemBuilder: (context, index) {
+            final p = top10[index];
+            return _buildProspectCard(p, index + 1);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProspectCard(Map<String, dynamic> player, int rank) {
+    final String name = player['name'] ?? 'Unknown';
+    final String pos = player['pos'] ?? 'UNK';
+    final String college = player['college'] ?? 'College';
+    final String imageUrl = player['imageUrl'] ?? '';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16.h),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: 8.h,
+            left: 8.w,
+            child: Text(
+              "$rank",
+              style: TextStyle(
+                color: Colors.white10,
+                fontSize: 24.sp,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.all(12.w),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 24.w,
+                  backgroundColor: AppColors.brandDark,
+                  backgroundImage: imageUrl.isNotEmpty ? CachedNetworkImageProvider(imageUrl) : null,
+                  child: imageUrl.isEmpty ? Icon(Icons.person, color: Colors.white10, size: 24.w) : null,
+                ),
+                SizedBox(height: 8.h),
+                Text(
+                  name.toUpperCase(),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11.sp,
+                    fontWeight: FontWeight.w900,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  maxLines: 2,
+                ),
+                SizedBox(height: 4.h),
+                Text(
+                  "$pos • $college",
+                  style: TextStyle(
+                    color: _getPositionColor(pos),
+                    fontSize: 9.sp,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1688,8 +2186,8 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
           CircleAvatar(
             radius: 18.w,
             backgroundColor: AppColors.createGradientPurple.withOpacity(0.1),
-            backgroundImage: resolveProfileImage(player['photoUrl'] as String?),
-            child: resolveProfileImage(player['photoUrl'] as String?) == null
+            backgroundImage: resolveProfileImage(player['photoUrl'] as String? ?? player['imageUrl'] as String?),
+            child: resolveProfileImage(player['photoUrl'] as String? ?? player['imageUrl'] as String?) == null
                 ? Icon(Icons.person, color: Colors.white24, size: 20.w)
                 : null,
           ),

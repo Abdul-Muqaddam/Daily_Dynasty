@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/colors.dart';
 import '../../core/responsive_helper.dart';
 import '../../services/league_service.dart';
@@ -22,6 +23,8 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
   String _leagueType = 'redraft';
   String _draftType = 'snake';
   String _scoringType = 'standard';
+  String _selectedTier = 'Rookie';
+  List<String> _unlockedTiers = ['Rookie'];
   bool _allowPublicJoin = false;
   bool _isLoading = false;
 
@@ -44,6 +47,22 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
       parent: _codeAnimController,
       curve: Curves.elasticOut,
     );
+    _fetchUnlockedTiers();
+  }
+
+  Future<void> _fetchUnlockedTiers() async {
+    try {
+      final user = LeagueService.currentUser;
+      if (user != null) {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        if (doc.exists) {
+          final tiers = List<String>.from(doc.data()?['unlockedTiers'] ?? ['Rookie']);
+          if (mounted) setState(() => _unlockedTiers = tiers);
+        }
+      }
+    } catch (e) {
+      // Fallback to Rookie
+    }
   }
 
   @override
@@ -59,7 +78,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
       AppDialogs.showPremiumErrorDialog(context, message: "Please enter a league name.");
       return;
     }
-    if (_currentStep < 4) {
+    if (_currentStep < 5) {
       setState(() => _currentStep++);
       _pageController.animateToPage(
         _currentStep,
@@ -90,6 +109,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
         maxMembers: _maxMembers,
         scoringType: _scoringType,
         allowPublicJoin: _allowPublicJoin,
+        tier: _selectedTier,
       );
 
       // Fetch the join code back
@@ -176,6 +196,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
                     children: [
                       _buildStep1(),
                       _buildStep2(),
+                      _buildStepTier(),
                       _buildStep3(),
                       _buildStep4(),
                       _buildStep5(),
@@ -195,7 +216,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 16.h),
       child: Row(
-        children: List.generate(5, (i) {
+        children: List.generate(6, (i) {
           final isActive = i == _currentStep;
           final isDone = i < _currentStep;
           return Expanded(
@@ -367,6 +388,92 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
               Icon(Icons.check_circle, color: AppColors.accentCyan, size: 24.w),
           ],
         ),
+      ),
+    );
+  }
+
+  // ─── Step Tier Selection ──────────────────────────────────────────────────
+  Widget _buildStepTier() {
+    return SingleChildScrollView(
+      padding: EdgeInsets.all(24.w),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(height: 20.h),
+          Icon(Icons.workspace_premium_rounded, color: AppColors.accentCyan, size: 48.w),
+          SizedBox(height: 20.h),
+          Text(
+            'Select Competitive Tier',
+            style: TextStyle(color: Colors.white, fontSize: 28.sp, fontWeight: FontWeight.w900),
+          ),
+          SizedBox(height: 8.h),
+          Text(
+            'Win championships to unlock higher tiers with tougher opponents.',
+            style: TextStyle(color: Colors.white54, fontSize: 14.sp),
+          ),
+          SizedBox(height: 32.h),
+
+          ...LeagueService.TIER_ORDER.map((tier) {
+            final bool isUnlocked = _unlockedTiers.contains(tier);
+            final bool isSelected = _selectedTier == tier;
+            
+            String difficulty = "EASY";
+            String botGrade = "50-65";
+            if (tier == "Pro") { difficulty = "NORMAL"; botGrade = "60-75"; }
+            if (tier == "Legendary") { difficulty = "HARD"; botGrade = "70-85"; }
+            if (tier == "Hall of Fame") { difficulty = "EXPERT"; botGrade = "80-95"; }
+
+            return GestureDetector(
+              onTap: isUnlocked ? () => setState(() => _selectedTier = tier) : null,
+              child: Opacity(
+                opacity: isUnlocked ? 1.0 : 0.4,
+                child: Container(
+                  margin: EdgeInsets.only(bottom: 16.h),
+                  padding: EdgeInsets.all(20.w),
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppColors.accentCyan.withOpacity(0.1) : Colors.white.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(16.h),
+                    border: Border.all(
+                      color: isSelected ? AppColors.accentCyan : Colors.white10,
+                      width: isSelected ? 2 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(tier.toUpperCase(), style: TextStyle(color: Colors.white, fontSize: 18.sp, fontWeight: FontWeight.w900)),
+                                if (!isUnlocked) ...[
+                                  SizedBox(width: 8.w),
+                                  Icon(Icons.lock, color: Colors.white24, size: 16.w),
+                                ],
+                              ],
+                            ),
+                            SizedBox(height: 4.h),
+                            Row(
+                              children: [
+                                Text("DIFFICULTY: ", style: TextStyle(color: Colors.white38, fontSize: 10.sp)),
+                                Text(difficulty, style: TextStyle(color: AppColors.accentCyan, fontSize: 10.sp, fontWeight: FontWeight.bold)),
+                                Text("  |  BOT GRADE: ", style: TextStyle(color: Colors.white38, fontSize: 10.sp)),
+                                Text(botGrade, style: TextStyle(color: Colors.white70, fontSize: 10.sp, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isSelected) 
+                        Icon(Icons.check_circle, color: AppColors.accentCyan, size: 24.w),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ],
       ),
     );
   }
@@ -656,6 +763,8 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
               children: [
                 _buildSummaryRow('League Name', name, Icons.emoji_events),
                 Divider(color: Colors.white10, height: 24.h),
+                _buildSummaryRow('Tier', _selectedTier.toUpperCase(), Icons.workspace_premium_rounded),
+                Divider(color: Colors.white10, height: 24.h),
                 _buildSummaryRow('League Type', _leagueType.toUpperCase(), Icons.category),
                 Divider(color: Colors.white10, height: 24.h),
                 _buildSummaryRow('Draft Type', _draftType.toUpperCase(), Icons.format_list_numbered),
@@ -692,7 +801,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
   // ─── Bottom Button ─────────────────────────────────────────────────────────
 
   Widget _buildBottomButton() {
-    final isLastStep = _currentStep == 4;
+    final isLastStep = _currentStep == 5;
     return Container(
       padding: EdgeInsets.fromLTRB(24.w, 12.h, 24.w, 32.h),
       child: Container(

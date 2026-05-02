@@ -90,6 +90,14 @@ class _CommissionerToolsScreenState extends State<CommissionerToolsScreen> {
             ),
             SizedBox(height: 12.h),
             _buildActionCard(
+              "Schedule Draft Date",
+              "Sets a global countdown for the draft start. Everyone will wait for this specific time.",
+              Icons.calendar_month_rounded,
+              AppColors.accentCyan,
+              () => _showDateTimePicker(widget.leagueId),
+            ),
+            SizedBox(height: 12.h),
+            _buildActionCard(
               "Launch Live Draft",
               "Starts the pick clock. All players in the league will see the Draft Room go live.",
               Icons.play_circle_rounded,
@@ -187,6 +195,24 @@ class _CommissionerToolsScreenState extends State<CommissionerToolsScreen> {
                 () => _runAction("Advancing Season", () => LeagueService.advanceToNextSeason(widget.leagueId)),
               ),
             ),
+            SizedBox(height: 32.h),
+
+            _buildSectionHeader("DEVELOPER TOOLS", Icons.bug_report_rounded),
+            SizedBox(height: 12.h),
+            _buildActionCard(
+              "Debug: Unlock All Tiers",
+              "INSTANTLY unlocks Pro, Legendary, and Hall of Fame tiers for your account. (Development only)",
+              Icons.bolt_rounded,
+              Colors.amber,
+              () => _runAction("Unlocking Tiers", () async {
+                final user = LeagueService.currentUser;
+                if (user != null) {
+                  await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+                    'unlockedTiers': LeagueService.TIER_ORDER,
+                  });
+                }
+              }),
+            ),
             SizedBox(height: 80.h),
           ],
         ),
@@ -254,6 +280,66 @@ class _CommissionerToolsScreenState extends State<CommissionerToolsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _showDateTimePicker(String leagueId) async {
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 60)),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: AppColors.accentCyan,
+            onPrimary: Colors.black,
+            surface: AppColors.surface,
+            onSurface: Colors.white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+
+    if (pickedDate != null) {
+      final TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: const TimeOfDay(hour: 20, minute: 0),
+        builder: (context, child) => Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: AppColors.accentCyan,
+              onPrimary: Colors.black,
+              surface: AppColors.surface,
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        ),
+      );
+
+      if (pickedTime != null) {
+        final scheduledDateTime = DateTime(
+          pickedDate.year,
+          pickedDate.month,
+          pickedDate.day,
+          pickedTime.hour,
+          pickedTime.minute,
+        );
+
+        await _runAction("Scheduling Draft", () async {
+          await FirebaseFirestore.instance
+              .collection('leagues')
+              .doc(leagueId)
+              .collection('draft')
+              .doc('info')
+              .set({
+            'status': 'scheduled',
+            'scheduledStartTime': Timestamp.fromDate(scheduledDateTime),
+          }, SetOptions(merge: true));
+        });
+      }
+    }
   }
 
   Future<void> _showConfirmDialog(String title, String message, Color dangerColor, VoidCallback onConfirm) async {

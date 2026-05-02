@@ -14,6 +14,15 @@ class SleeperService {
         final Map<String, dynamic> data = json.decode(response.body);
         final List<Map<String, dynamic>> filteredPlayers = [];
         final allowedPos = {'QB', 'RB', 'WR', 'TE', 'K'};
+        final firstNames = [
+          "James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Thomas", "Charles", 
+          "Christopher", "Daniel", "Matthew", "Anthony", "Mark", "Donald", "Steven", "Paul", "Andrew", "Joshua",
+          "Kevin", "Brian", "George", "Edward", "Ronald", "Timothy", "Jason", "Jeffrey", "Ryan", "Jacob"
+        ];
+        final lastNames = [
+          "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", 
+          "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin"
+        ];
         final random = Random();
 
         data.forEach((id, player) {
@@ -32,9 +41,14 @@ class SleeperService {
             else if (spsValue >= 80) grade = 'B';
             else if (spsValue >= 77) grade = 'B-';
 
+            final firstName = firstNames[random.nextInt(firstNames.length)];
+            final lastName = lastNames[random.nextInt(lastNames.length)];
+            final fakeName = "$firstName $lastName".toUpperCase();
+            final fakeImageUrl = "https://api.dicebear.com/7.x/avataaars/png?seed=$firstName$lastName$id";
+
             filteredPlayers.add({
               'player_id': id,
-              'name': (player['full_name'] ?? "${player['first_name']} ${player['last_name']}").toUpperCase(),
+              'name': fakeName,
               'team': team.toString().toUpperCase(),
               'pos': pos,
               'age': player['age'] ?? 21 + random.nextInt(12),
@@ -43,8 +57,8 @@ class SleeperService {
               'grade': grade,
               'trend': random.nextInt(2000) - 1000, // Mock trend amount (-1000 to +1000)
               'isDrafted': false,
-              'isReal': true,
-              'imageUrl': 'https://sleepercdn.com/content/nfl/players/thumb/$id.jpg',
+              'isReal': false, // Marked as false because we fake-ified it
+              'imageUrl': fakeImageUrl,
             });
           }
         });

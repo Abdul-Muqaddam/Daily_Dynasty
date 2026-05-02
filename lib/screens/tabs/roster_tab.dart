@@ -111,6 +111,26 @@ class _RosterTabState extends State<RosterTab> {
 
   @override
   Widget build(BuildContext context) {
+    // SYNC: If the user opened a different league in another screen,
+    // update the RosterTab to reflect that league automatically.
+    if (LeagueService.activeLeagueId != null && 
+        _selectedLeague != null && 
+        _selectedLeague!['id'] != LeagueService.activeLeagueId) {
+      final matchingLeague = _myLeagues.firstWhere(
+        (l) => l['id'] == LeagueService.activeLeagueId,
+        orElse: () => {},
+      );
+      if (matchingLeague.isNotEmpty) {
+        Future.delayed(Duration.zero, () {
+          if (mounted) {
+            setState(() => _selectedLeague = matchingLeague);
+            _loadRoster();
+            _loadPicks();
+          }
+        });
+      }
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
@@ -160,33 +180,91 @@ class _RosterTabState extends State<RosterTab> {
   Widget _buildLeagueSelector() {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20.w, vertical: 8.h),
-      padding: EdgeInsets.symmetric(horizontal: 16.w),
+      padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 12.h),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12.h),
         border: Border.all(color: Colors.white10),
       ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<Map<String, dynamic>>(
-          value: _selectedLeague,
-          dropdownColor: AppColors.surface,
-          isExpanded: true,
-          icon: Icon(Icons.swap_vert, color: AppColors.accentCyan),
-          items: _myLeagues.map((league) {
-            return DropdownMenuItem(
-              value: league,
-              child: Text(
-                league['name']?.toString().toUpperCase() ?? "UNKNOWN",
-                style: TextStyle(color: Colors.white, fontSize: 13.sp, fontWeight: FontWeight.bold),
+      child: GestureDetector(
+        onTap: () => _showLeaguePicker(context),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              (_selectedLeague?['name'] ?? "UNKNOWN").toString().toUpperCase(),
+              style: TextStyle(color: Colors.white, fontSize: 13.sp, fontWeight: FontWeight.bold),
+            ),
+            Icon(Icons.unfold_more_rounded, color: AppColors.accentCyan),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showLeaguePicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24.h)),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: 16.h),
+              Container(
+                width: 40.w,
+                height: 4.h,
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2.h)),
               ),
-            );
-          }).toList(),
-          onChanged: (val) {
-            if (val != null) {
-              setState(() => _selectedLeague = val);
-              _loadRoster();
-            }
-          },
+              SizedBox(height: 16.h),
+              Text("SWITCH LEAGUE", style: TextStyle(color: Colors.white, fontSize: 16.sp, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
+              SizedBox(height: 12.h),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: EdgeInsets.only(bottom: 24.h),
+                  children: _myLeagues.map((league) {
+                    final isSelected = _selectedLeague?['id'] == league['id'];
+                    return ListTile(
+                      onTap: () {
+                        setState(() => _selectedLeague = league);
+                        LeagueService.activeLeague = league; // SYNC BACK
+                        _loadRoster();
+                        _loadPicks();
+                        Navigator.pop(context);
+                      },
+                      leading: Container(
+                        width: 32.w,
+                        height: 32.w,
+                        decoration: BoxDecoration(
+                          color: isSelected ? AppColors.accentCyan : AppColors.surface,
+                          borderRadius: BorderRadius.circular(8.h),
+                        ),
+                        child: Icon(Icons.shield_rounded, color: isSelected ? Colors.black : Colors.white24, size: 18.w),
+                      ),
+                      title: Text(
+                        (league['name'] ?? "UNKNOWN").toString().toUpperCase(),
+                        style: TextStyle(
+                          color: isSelected ? AppColors.accentCyan : Colors.white,
+                          fontSize: 14.sp,
+                          fontWeight: isSelected ? FontWeight.w900 : FontWeight.bold,
+                        ),
+                      ),
+                      trailing: isSelected ? Icon(Icons.check_circle, color: AppColors.accentCyan, size: 20.w) : null,
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

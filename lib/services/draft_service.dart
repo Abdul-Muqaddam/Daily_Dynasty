@@ -80,10 +80,11 @@ class DraftService {
 
     // Initialize Draft Data
     await draftRef.set({
-      'status': 'waiting', // waiting -> active -> completed
+      'status': 'waiting', // waiting -> scheduled -> active -> completed
       'currentPickIndex': 0,
       'draftOrder': masterDraftOrder,
       'pickDeadline': null, 
+      'scheduledStartTime': null, // Can be set via Commissioner HQ
       'history': [], // Ledger of picks
     });
   }

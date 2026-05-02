@@ -315,10 +315,8 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
       return const Center(child: CircularProgressIndicator(color: AppColors.accentCyan));
     }
 
-    // For real users, hide automated Bronze leagues to force the Join/Create flow
-    final displayLeagues = _isGuest 
-        ? leagues 
-        : leagues.where((l) => l['tier'] != 'Bronze').toList();
+    // Display all leagues the user is a member of
+    final displayLeagues = leagues;
 
     if (displayLeagues.isEmpty) {
       return _buildEmptyState();
@@ -474,6 +472,22 @@ class _LeagueTabState extends State<LeagueTab> with SingleTickerProviderStateMix
                           ),
                         ),
                         SizedBox(width: 8.w),
+                        // Computer Generated Tag
+                        if (league['isOffline'] == true) ...[
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
+                            decoration: BoxDecoration(
+                              color: Colors.purple.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(20.h),
+                              border: Border.all(color: Colors.purple.withOpacity(0.4)),
+                            ),
+                            child: Text(
+                              'COMPUTER GENERATED',
+                              style: TextStyle(color: Colors.purple[300], fontSize: 8.sp, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          SizedBox(width: 8.w),
+                        ],
                         // Status Tag
                         Container(
                           padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),

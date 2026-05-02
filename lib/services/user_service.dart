@@ -47,7 +47,8 @@ class UserService {
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
-    // User initialized with profile only; will choose league in Discovery flow.
+    // 2. Setup the initial Rookie computer league for the user
+    await LeagueService.setupInitialRookieLeague(uid);
   }
 
   /// New Method: Fetches a username for a given UID, using a local cache.

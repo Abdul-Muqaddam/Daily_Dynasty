@@ -8,6 +8,8 @@ import '../core/responsive_helper.dart';
 import '../services/draft_service.dart';
 import '../services/user_service.dart';
 import '../widgets/app_dialogs.dart';
+import 'package:intl/intl.dart';
+import '../services/draft_schedule_service.dart';
 import 'mock_draft_screen.dart';
 
 class DraftRoomScreen extends StatefulWidget {
@@ -44,12 +46,26 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
   }
 
   String _formatClockStream(Timestamp? deadline) {
-    if (deadline == null) return "0:00";
+    if (deadline == null) return "00:00";
     final diff = deadline.toDate().difference(DateTime.now());
-    if (diff.inSeconds <= 0) return "0:00";
-    final min = diff.inMinutes;
-    final sec = (diff.inSeconds % 60).toString().padLeft(2, '0');
-    return "$min:$sec";
+    if (diff.inSeconds <= 0) return "00:00";
+    
+    if (diff.inDays >= 1) {
+      final days = diff.inDays;
+      final hours = diff.inHours % 24;
+      final mins = diff.inMinutes % 60;
+      return "${days}d ${hours}h ${mins}m";
+    }
+    
+    final hours = diff.inHours;
+    final mins = diff.inMinutes % 60;
+    final secs = (diff.inSeconds % 60).toString().padLeft(2, '0');
+    
+    if (hours >= 1) {
+      return "${hours}:${mins.toString().padLeft(2, '0')}:${secs}";
+    }
+    
+    return "${mins}:${secs}";
   }
 
   @override
@@ -101,13 +117,13 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
             final history = List<dynamic>.from(data['history'] ?? []);
             final deadline = data['pickDeadline'] as Timestamp?;
 
-            bool isComplete = status == 'completed' || currentIndex >= draftOrder.length;
-            String onTheClockId = isComplete ? '' : draftOrder[currentIndex];
+            bool isComplete = status == 'completed' || (draftOrder.isNotEmpty && currentIndex >= draftOrder.length);
+            String onTheClockId = (isComplete || draftOrder.isEmpty) ? '' : draftOrder[currentIndex];
             bool isMyTurn = onTheClockId == _currentUserId;
 
             return Column(
               children: [
-                _buildDraftHeader(status, onTheClockId, deadline, isMyTurn, isComplete, currentIndex),
+                _buildDraftHeader(status, onTheClockId, deadline, isMyTurn, isComplete, currentIndex, data['scheduledStartTime'] as Timestamp?),
                 Expanded(
                   child: TabBarView(
                     children: [
@@ -140,7 +156,7 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
     );
   }
 
-  Widget _buildDraftHeader(String status, String onClockId, Timestamp? deadline, bool isMyTurn, bool isComplete, int pickNum) {
+  Widget _buildDraftHeader(String status, String onClockId, Timestamp? deadline, bool isMyTurn, bool isComplete, int pickNum, Timestamp? scheduledStartTime) {
     if (isComplete) {
       return Container(
         width: double.infinity,
@@ -155,16 +171,40 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
       );
     }
     
-    if (status == 'waiting') {
+    if (status == 'waiting' || status == 'scheduled') {
+      final scheduledStart = scheduledStartTime;
+      final isFuture = scheduledStart != null && scheduledStart.toDate().isAfter(DateTime.now());
+
       return Container(
         width: double.infinity,
-        padding: EdgeInsets.all(16.h),
+        padding: EdgeInsets.all(20.h),
         color: AppColors.surface,
-        child: Center(
-          child: Text(
-            "WAITING FOR COMMISSIONER TO START",
-            style: TextStyle(color: Colors.white54, fontSize: 14.sp, fontWeight: FontWeight.bold),
-          ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              isFuture ? "DRAFT BEGINS IN:" : "WAITING FOR COMMISSIONER TO START",
+              style: TextStyle(color: Colors.white54, fontSize: 12.sp, fontWeight: FontWeight.bold, letterSpacing: 1.0),
+            ),
+            if (isFuture) ...[
+              SizedBox(height: 12.h),
+              Text(
+                _formatClockStream(scheduledStart),
+                style: TextStyle(
+                  color: AppColors.gold,
+                  fontSize: 32.sp,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.0,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              SizedBox(height: 8.h),
+              Text(
+                "SCHEDULED START: ${DateFormat('MMM dd, hh:mm a').format(scheduledStart.toDate())}",
+                style: TextStyle(color: Colors.white38, fontSize: 10.sp, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ],
         ),
       );
     }
@@ -346,8 +386,8 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
           ),
           SizedBox(height: 4.h),
           Text(
-            "Draft time has not been set",
-            style: TextStyle(color: Colors.white38, fontSize: 13.sp, fontWeight: FontWeight.bold),
+            "Next Global Draft: ${DraftScheduleService.getFormattedNextDraftDate()}",
+            style: TextStyle(color: brandColor.withOpacity(0.8), fontSize: 13.sp, fontWeight: FontWeight.bold),
           ),
           SizedBox(height: 24.h),
           Row(
@@ -384,7 +424,7 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
                 ),
               ),
               SizedBox(width: 12.w),
-              // SET TIME Button
+              // SCHEDULED Button
               Expanded(
                 flex: 2,
                 child: Container(
@@ -398,7 +438,7 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
                       Expanded(
                         child: Center(
                           child: Text(
-                            "SET TIME",
+                            DraftScheduleService.isDraftDay() ? "DRAFT IS OPEN" : "GLOBAL DRAFT",
                             style: TextStyle(color: brandColor, fontSize: 14.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
                           ),
                         ),
@@ -409,7 +449,7 @@ class _DraftRoomScreenState extends State<DraftRoomScreen> {
                         decoration: BoxDecoration(
                           border: Border(left: BorderSide(color: brandColor, width: 2)),
                         ),
-                        child: Icon(Icons.grid_view_rounded, color: brandColor, size: 20.w),
+                        child: Icon(Icons.event_available, color: brandColor, size: 20.w),
                       ),
                     ],
                   ),
