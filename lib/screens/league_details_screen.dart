@@ -1586,37 +1586,6 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
                     if (widget.league['tier'] == 'Rookie' && players.isNotEmpty) 
                       _buildTutorialCard(),
                     _buildTeamHeader(teamName, username, teamSps),
-                    if (players.isEmpty) 
-                      Padding(
-                        padding: EdgeInsets.symmetric(vertical: 32.h),
-                        child: GestureDetector(
-                          onTap: () async {
-                            await LeagueService.fillUserRosterWithBots(leagueId, userId);
-                          },
-                          child: Container(
-                            width: double.infinity,
-                            padding: EdgeInsets.symmetric(vertical: 16.h),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(colors: [AppColors.accentCyan, AppColors.accentTeal]),
-                              borderRadius: BorderRadius.circular(12.h),
-                              boxShadow: [
-                                BoxShadow(color: AppColors.accentCyan.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4)),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.auto_awesome, color: AppColors.background, size: 20.w),
-                                SizedBox(width: 12.w),
-                                Text(
-                                  "GENERATE INITIAL TEAM",
-                                  style: TextStyle(color: AppColors.background, fontSize: 13.sp, fontWeight: FontWeight.w900, letterSpacing: 1.0),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
                     // --- 10 Starter Slots ---
                     _buildTeamSectionHeader("Starters"),
                     ...List.generate(rosterSlots.length, (i) {

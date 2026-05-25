@@ -57,7 +57,15 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
         final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
         if (doc.exists) {
           final tiers = List<String>.from(doc.data()?['unlockedTiers'] ?? ['Rookie']);
-          if (mounted) setState(() => _unlockedTiers = tiers);
+          if (mounted) {
+            setState(() {
+              _unlockedTiers = tiers;
+              // Set selected tier to the highest unlocked one
+              if (_unlockedTiers.isNotEmpty) {
+                _selectedTier = _unlockedTiers.last;
+              }
+            });
+          }
         }
       }
     } catch (e) {
@@ -78,7 +86,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
       AppDialogs.showPremiumErrorDialog(context, message: "Please enter a league name.");
       return;
     }
-    if (_currentStep < 5) {
+    if (_currentStep < 4) {
       setState(() => _currentStep++);
       _pageController.animateToPage(
         _currentStep,
@@ -196,7 +204,6 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
                     children: [
                       _buildStep1(),
                       _buildStep2(),
-                      _buildStepTier(),
                       _buildStep3(),
                       _buildStep4(),
                       _buildStep5(),
@@ -216,7 +223,7 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen>
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 16.h),
       child: Row(
-        children: List.generate(6, (i) {
+        children: List.generate(5, (i) {
           final isActive = i == _currentStep;
           final isDone = i < _currentStep;
           return Expanded(

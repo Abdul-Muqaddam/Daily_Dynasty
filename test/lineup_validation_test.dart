@@ -35,4 +35,3 @@ void main() {
   });
 }
 
-// Note: I will need to expose _validatePosition for testing or use a helper.

@@ -79,8 +79,11 @@ class LeagueService {
     await docRef.update({'members': [user.uid]}); // Ensure creator is in members before pick init
     await PickService.initializeFuturePicks(docRef.id, [user.uid]);
     
-    // Initialize roster for creator
-    await initializeRoster(docRef.id, user.uid);
+    // Initialize roster for creator with a random team (Client Requirement)
+    await fillUserRosterWithBots(docRef.id, user.uid);
+
+    // FILL WITH BOTS AUTOMATICALLY (Client Requirement)
+    await fillRemainingWithBots(docRef.id);
 
     return docRef.id;
   }
@@ -312,12 +315,37 @@ class LeagueService {
       throw Exception('This league is full');
     }
 
-    // 3. Add to members array and initialize roster
-    await _db.collection('leagues').doc(leagueId).update({
-      'members': FieldValue.arrayUnion([user.uid])
-    });
+    // 3. Find a bot to replace if possible
+    final List<String> botIds = members.where((m) => m.startsWith('bot_')).toList();
+    
+    if (botIds.isNotEmpty) {
+      final botToReplace = botIds.first;
+      
+      // Transfer bot roster to user
+      final botRosterDoc = await _db.collection('leagues').doc(leagueId).collection('rosters').doc(botToReplace).get();
+      if (botRosterDoc.exists) {
+        await _db.collection('leagues').doc(leagueId).collection('rosters').doc(user.uid).set(botRosterDoc.data()!);
+        await _db.collection('leagues').doc(leagueId).collection('rosters').doc(botToReplace).delete();
+      }
 
-    await initializeRoster(leagueId, user.uid);
+      // Update members: remove bot, add user
+      final updatedMembers = List<String>.from(members);
+      updatedMembers.remove(botToReplace);
+      updatedMembers.add(user.uid);
+
+      await _db.collection('leagues').doc(leagueId).update({
+        'members': updatedMembers
+      });
+
+      // Optional: Delete bot user doc
+      await _db.collection('users').doc(botToReplace).delete();
+    } else {
+      // No bot to replace, just add (shouldn't happen in bot-filled leagues)
+      await _db.collection('leagues').doc(leagueId).update({
+        'members': FieldValue.arrayUnion([user.uid])
+      });
+      await initializeRoster(leagueId, user.uid);
+    }
   }
 
   /// Join a league by its direct document ID (bypasses join code requirement for public discovery).
@@ -335,11 +363,35 @@ class LeagueService {
     if (members.contains(user.uid)) throw Exception('You are already a member');
     if (members.length >= maxMembers) throw Exception('League is full');
 
-    await _db.collection('leagues').doc(leagueId).update({
-      'members': FieldValue.arrayUnion([user.uid])
-    });
+    // 3. Find a bot to replace if possible
+    final List<String> botIds = members.where((m) => m.startsWith('bot_')).toList();
+    
+    if (botIds.isNotEmpty) {
+      final botToReplace = botIds.first;
+      
+      // Transfer bot roster to user
+      final botRosterDoc = await _db.collection('leagues').doc(leagueId).collection('rosters').doc(botToReplace).get();
+      if (botRosterDoc.exists) {
+        await _db.collection('leagues').doc(leagueId).collection('rosters').doc(user.uid).set(botRosterDoc.data()!);
+        await _db.collection('leagues').doc(leagueId).collection('rosters').doc(botToReplace).delete();
+      }
 
-    await initializeRoster(leagueId, user.uid);
+      // Update members
+      final updatedMembers = List<String>.from(members);
+      updatedMembers.remove(botToReplace);
+      updatedMembers.add(user.uid);
+
+      await _db.collection('leagues').doc(leagueId).update({
+        'members': updatedMembers
+      });
+
+      await _db.collection('users').doc(botToReplace).delete();
+    } else {
+      await _db.collection('leagues').doc(leagueId).update({
+        'members': FieldValue.arrayUnion([user.uid])
+      });
+      await initializeRoster(leagueId, user.uid);
+    }
   }
 
   /// Fetches the user profiles for a list of UIDs.

@@ -81,6 +81,18 @@ class _AgeVerificationScreenState extends State<AgeVerificationScreen> {
           );
         }
       }
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        String message = "An error occurred. Please try again.";
+        if (e.code == 'email-already-in-use') {
+          message = "This email address is already in use. Please use a different email or log in.";
+        } else if (e.code == 'weak-password') {
+          message = "The password provided is too weak.";
+        } else if (e.code == 'invalid-email') {
+          message = "The email address is invalid.";
+        }
+        AppDialogs.showPremiumErrorDialog(context, message: message);
+      }
     } catch (e) {
       if (mounted) {
         AppDialogs.showPremiumErrorDialog(context, message: "Error saving age. Please try again.");
